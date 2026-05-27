@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
-from sentry_backend.repository import alert_repo, clip_repo
+from sentry_backend.repository import alert_repo
 from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic
+from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 
 router = APIRouter(prefix="/api/v1/internal", tags=["internal"])
@@ -57,4 +58,12 @@ async def create_alert_from_ai(
         alert_level=alert_level,
         inference_latency_ms=body.inference_latency_ms,
     )
+
+    # Commit must happen BEFORE publishing — otherwise SSE clients receive
+    # an alert ID that briefly doesn't exist in the DB.
+    await db.commit()
+
+    payload = AlertPublic.model_validate(alert).model_dump(mode="json")
+    await get_broker().publish(clip.organization_id, payload)
+
     return AlertPublic.model_validate(alert)
