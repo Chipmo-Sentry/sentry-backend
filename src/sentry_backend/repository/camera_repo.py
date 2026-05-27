@@ -38,7 +38,7 @@ async def get_camera_for_org(
     return result.scalar_one_or_none()
 
 
-async def _store_belongs_to_org(
+async def store_belongs_to_org(
     db: AsyncSession, store_id: UUID, org_id: UUID
 ) -> bool:
     result = await db.execute(
@@ -61,7 +61,7 @@ async def create_camera(
     enabled: bool,
 ) -> Camera | None:
     """Return None if the store doesn't belong to the org (404 surfaced by caller)."""
-    if not await _store_belongs_to_org(db, store_id, org_id):
+    if not await store_belongs_to_org(db, store_id, org_id):
         return None
     cam = Camera(
         store_id=store_id,

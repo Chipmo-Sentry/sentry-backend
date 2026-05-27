@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     clip_storage_dir: str = "./storage/clips"
     max_clip_size_mb: int = 100
 
+    sentry_ai_url: str | None = None  # e.g. http://localhost:8001 — None disables verify
+    sentry_ai_timeout_sec: int = 60
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @field_validator("allowed_origins", mode="before")

@@ -10,8 +10,12 @@ from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from sentry_backend import __version__
+from sentry_backend.api.v1 import alerts as alerts_v1
 from sentry_backend.api.v1 import auth as auth_v1
 from sentry_backend.api.v1 import cameras as cameras_v1
+from sentry_backend.api.v1 import clips as clips_v1
+from sentry_backend.api.v1 import feedback as feedback_v1
+from sentry_backend.api.v1 import internal as internal_v1
 from sentry_backend.api.v1 import stores as stores_v1
 from sentry_backend.db.session import dispose_engine, get_sessionmaker
 from sentry_backend.logging_setup import configure_logging, get_logger
@@ -73,6 +77,10 @@ def create_app() -> FastAPI:
     app.include_router(auth_v1.router)
     app.include_router(stores_v1.router)
     app.include_router(cameras_v1.router)
+    app.include_router(clips_v1.router)
+    app.include_router(alerts_v1.router)
+    app.include_router(feedback_v1.router)
+    app.include_router(internal_v1.router)
 
     return app
 

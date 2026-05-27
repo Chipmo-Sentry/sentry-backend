@@ -1,0 +1,35 @@
+"""Alert schemas."""
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from sentry_backend.db.models.alert import AlertCategory, AlertLevel
+
+
+class AlertPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    clip_id: UUID
+    organization_id: UUID
+    store_id: UUID | None
+    camera_id: UUID | None
+    category: AlertCategory
+    confidence: float
+    reasoning: str
+    model_name: str
+    alert_level: AlertLevel
+    inference_latency_ms: int
+    created_at: datetime
+
+
+class AlertCreateInternal(BaseModel):
+    """POST /api/v1/internal/alerts — sentry-ai service posts this."""
+
+    clip_id: UUID
+    category: AlertCategory
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str = Field(min_length=1, max_length=2000)
+    model_name: str = Field(min_length=1, max_length=64)
+    inference_latency_ms: int = Field(ge=0)
