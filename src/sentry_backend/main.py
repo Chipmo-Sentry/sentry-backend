@@ -10,6 +10,7 @@ from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from sentry_backend import __version__
+from sentry_backend.api.v1 import auth as auth_v1
 from sentry_backend.db.session import dispose_engine, get_sessionmaker
 from sentry_backend.logging_setup import configure_logging, get_logger
 from sentry_backend.settings import get_settings
@@ -66,6 +67,8 @@ def create_app() -> FastAPI:
         async with sm() as session:
             await session.execute(text("SELECT 1"))
         return {"status": "ok", "version": __version__}
+
+    app.include_router(auth_v1.router)
 
     return app
 
