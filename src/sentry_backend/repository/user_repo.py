@@ -1,4 +1,5 @@
 """User CRUD operations."""
+
 from uuid import UUID
 
 from sqlalchemy import select

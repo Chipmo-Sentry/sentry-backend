@@ -1,4 +1,5 @@
 """Application settings loaded from environment via pydantic-settings."""
+
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
@@ -53,4 +54,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]
+    return Settings()

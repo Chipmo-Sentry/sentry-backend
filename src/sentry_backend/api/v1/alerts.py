@@ -1,4 +1,5 @@
 """Alerts router — list + get + SSE stream (read-only; creation via internal endpoint)."""
+
 import asyncio
 import json
 from collections.abc import AsyncIterator
@@ -61,9 +62,7 @@ async def alert_stream(
             yield b": connected\n\n"
             while True:
                 try:
-                    payload = await asyncio.wait_for(
-                        q.get(), timeout=_SSE_KEEPALIVE_SEC
-                    )
+                    payload = await asyncio.wait_for(q.get(), timeout=_SSE_KEEPALIVE_SEC)
                     chunk = f"event: alert\ndata: {json.dumps(payload, default=str)}\n\n"
                     yield chunk.encode("utf-8")
                 except TimeoutError:

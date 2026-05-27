@@ -1,4 +1,5 @@
 """Authentication business logic."""
+
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession

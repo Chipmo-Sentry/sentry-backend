@@ -1,4 +1,5 @@
 """Stores router — org-scoped CRUD."""
+
 from typing import Annotated
 from uuid import UUID
 
@@ -46,9 +47,7 @@ async def get_store(
 ) -> StorePublic:
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
     return StorePublic.model_validate(store)
 
 
@@ -61,9 +60,7 @@ async def update_store(
 ) -> StorePublic:
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
     store = await store_repo.update_store(
         db,
         store,
@@ -82,7 +79,5 @@ async def delete_store(
 ) -> None:
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
     await store_repo.delete_store(db, store)

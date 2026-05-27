@@ -1,4 +1,5 @@
 """Alert CRUD."""
+
 from uuid import UUID
 
 from sqlalchemy import select
@@ -7,9 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
 
 
-async def get_alert_for_org(
-    db: AsyncSession, alert_id: UUID, org_id: UUID
-) -> Alert | None:
+async def get_alert_for_org(db: AsyncSession, alert_id: UUID, org_id: UUID) -> Alert | None:
     result = await db.execute(
         select(Alert).where(Alert.id == alert_id, Alert.organization_id == org_id)
     )

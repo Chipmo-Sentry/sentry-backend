@@ -1,4 +1,5 @@
 """Organization (multi-tenant root) + OrganizationMember junction."""
+
 import enum
 from uuid import UUID
 
@@ -13,12 +14,10 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "organizations"
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    slug: Mapped[str] = mapped_column(
-        String(63), unique=True, index=True, nullable=False
-    )
+    slug: Mapped[str] = mapped_column(String(63), unique=True, index=True, nullable=False)
 
 
-class OrgRole(str, enum.Enum):
+class OrgRole(enum.StrEnum):
     owner = "owner"
     admin = "admin"
     staff = "staff"
@@ -37,6 +36,4 @@ class OrganizationMember(TimestampMixin, Base):
         ForeignKey("organizations.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    role: Mapped[OrgRole] = mapped_column(
-        Enum(OrgRole, name="org_role"), nullable=False
-    )
+    role: Mapped[OrgRole] = mapped_column(Enum(OrgRole, name="org_role"), nullable=False)

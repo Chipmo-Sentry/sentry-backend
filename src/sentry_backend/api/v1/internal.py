@@ -1,4 +1,5 @@
 """Internal endpoints — service-to-service (e.g. sentry-ai → backend)."""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,9 +15,7 @@ from sentry_backend.services.alert_service import derive_alert_level
 router = APIRouter(prefix="/api/v1/internal", tags=["internal"])
 
 
-@router.post(
-    "/alerts", response_model=AlertPublic, status_code=status.HTTP_201_CREATED
-)
+@router.post("/alerts", response_model=AlertPublic, status_code=status.HTTP_201_CREATED)
 async def create_alert_from_ai(
     body: AlertCreateInternal,
     db: Annotated[AsyncSession, Depends(get_db)],

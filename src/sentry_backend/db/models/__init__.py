@@ -1,4 +1,5 @@
 """Import all ORM models so SQLAlchemy + Alembic see them."""
+
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.clip import Clip

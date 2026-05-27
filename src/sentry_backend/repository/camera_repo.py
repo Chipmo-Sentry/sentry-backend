@@ -1,4 +1,5 @@
 """Camera CRUD — joins via Store for org-scoping."""
+
 from typing import Any
 from uuid import UUID
 
@@ -26,9 +27,7 @@ async def list_cameras_for_org(
     return list(result.scalars().all())
 
 
-async def get_camera_for_org(
-    db: AsyncSession, camera_id: UUID, org_id: UUID
-) -> Camera | None:
+async def get_camera_for_org(db: AsyncSession, camera_id: UUID, org_id: UUID) -> Camera | None:
     stmt = (
         select(Camera)
         .join(Store, Camera.store_id == Store.id)
@@ -38,13 +37,9 @@ async def get_camera_for_org(
     return result.scalar_one_or_none()
 
 
-async def store_belongs_to_org(
-    db: AsyncSession, store_id: UUID, org_id: UUID
-) -> bool:
+async def store_belongs_to_org(db: AsyncSession, store_id: UUID, org_id: UUID) -> bool:
     result = await db.execute(
-        select(Store.id).where(
-            Store.id == store_id, Store.organization_id == org_id
-        )
+        select(Store.id).where(Store.id == store_id, Store.organization_id == org_id)
     )
     return result.scalar_one_or_none() is not None
 

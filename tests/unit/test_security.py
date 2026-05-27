@@ -1,4 +1,5 @@
 """Unit tests for security primitives — JWT, password hashing, Fernet."""
+
 from uuid import uuid4
 
 import pytest

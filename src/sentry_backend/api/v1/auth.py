@@ -1,4 +1,5 @@
 """Auth router — login / logout / refresh / me."""
+
 from typing import Annotated
 from uuid import UUID
 

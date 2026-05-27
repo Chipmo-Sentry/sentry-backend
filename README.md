@@ -131,11 +131,44 @@ CI runs all three; PR fails if any of them does.
 
 ## Deployment
 
-Target: **Railway Pro**. Postgres is a Railway add-on.
+Target: **Railway Pro**. Postgres is a Railway addon. CI lives in `.github/workflows/ci.yml` (ruff + mypy strict + pytest).
+
+### One-time Railway setup
+
+1. Create a new Railway project from this GitHub repo (Railway auto-detects `Dockerfile` + `railway.toml`).
+2. Add the **Postgres** addon → `DATABASE_URL` is wired automatically.
+3. Set these env vars in the Railway dashboard:
+
+   | Var | How to generate |
+   |---|---|
+   | `JWT_SECRET` | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+   | `SERVICE_TOKEN_SECRET` | same |
+   | `RTSP_FERNET_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+   | `ALLOWED_ORIGINS` | comma-separated, e.g. `https://app.sentry.chipmo.mn,https://admin.sentry.chipmo.mn` |
+   | `ENVIRONMENT` | `production` |
+   | `LOG_LEVEL` | `INFO` |
+
+4. Trigger a deploy. Container `CMD` runs `alembic upgrade head` then starts uvicorn.
+5. Expose a public domain (Railway → Settings → Networking) and CNAME `api.sentry.chipmo.mn` to it.
+
+### First-run: generate the initial migration
+
+The repo intentionally ships **no** initial migration (see [Migrations](#migrations)). Once Railway Postgres is reachable from your local machine:
 
 ```bash
-# Railway will run uvicorn on $PORT — see Dockerfile (TBD next session)
-# Migrations apply on container start: alembic upgrade head && uvicorn ...
+# Get DATABASE_URL from Railway (Settings → Variables → DATABASE_URL)
+export DATABASE_URL="postgresql+asyncpg://..."
+uv run alembic revision --autogenerate -m "initial schema"
+# Inspect alembic/versions/<id>_initial_schema.py, then commit + push.
+# Railway's next deploy will run `alembic upgrade head` automatically.
+```
+
+### Local Docker build (smoke test)
+
+```bash
+docker build -t sentry-backend:dev .
+docker run --rm -p 8000:8000 --env-file .env sentry-backend:dev
+curl http://localhost:8000/healthz
 ```
 
 ---

@@ -1,4 +1,5 @@
 """Store (physical retail location)."""
+
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String
@@ -19,6 +20,4 @@ class Store(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    timezone: Mapped[str] = mapped_column(
-        String(64), default="Asia/Ulaanbaatar", nullable=False
-    )
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Ulaanbaatar", nullable=False)

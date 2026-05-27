@@ -1,4 +1,5 @@
 """Store CRUD."""
+
 from uuid import UUID
 
 from sqlalchemy import select
@@ -9,9 +10,7 @@ from sentry_backend.db.models.store import Store
 
 async def list_stores_for_org(db: AsyncSession, org_id: UUID) -> list[Store]:
     result = await db.execute(
-        select(Store)
-        .where(Store.organization_id == org_id)
-        .order_by(Store.name)
+        select(Store).where(Store.organization_id == org_id).order_by(Store.name)
     )
     return list(result.scalars().all())
 

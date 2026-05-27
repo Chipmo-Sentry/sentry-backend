@@ -1,4 +1,5 @@
 """Current-user + role-based dependencies."""
+
 from typing import Annotated
 from uuid import UUID
 

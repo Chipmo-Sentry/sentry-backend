@@ -1,4 +1,5 @@
 """Resolve the current Organization for tenant-scoped endpoints."""
+
 from typing import Annotated
 from uuid import UUID
 
@@ -40,11 +41,9 @@ async def get_current_organization_id(
         return requested_org
 
     result = await db.execute(
-        select(OrganizationMember.organization_id).where(
-            OrganizationMember.user_id == user.id
-        )
+        select(OrganizationMember.organization_id).where(OrganizationMember.user_id == user.id)
     )
-    memberships = [row[0] for row in result.all()]
+    memberships: list[UUID] = list(result.scalars().all())
 
     if not memberships:
         raise HTTPException(

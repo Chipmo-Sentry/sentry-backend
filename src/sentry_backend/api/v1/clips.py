@@ -1,4 +1,5 @@
 """Clips router — multipart upload + listing + download."""
+
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -46,9 +47,7 @@ async def upload_clip(
                 detail="Camera not found or not in specified store",
             )
 
-    storage_path, size_bytes, sha256 = await save_upload_to_disk(
-        file, organization_id=org_id
-    )
+    storage_path, size_bytes, sha256 = await save_upload_to_disk(file, organization_id=org_id)
 
     if not clip_size_within_limit(size_bytes):
         storage_path.unlink(missing_ok=True)

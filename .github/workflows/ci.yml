@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type-test:
+    name: Lint + type-check + unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.16"
+          enable-cache: true
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies (frozen)
+        run: uv sync --frozen
+
+      - name: Ruff — format check
+        run: uv run ruff format --check .
+
+      - name: Ruff — lint
+        run: uv run ruff check .
+
+      - name: Mypy — strict type-check
+        run: uv run mypy src/sentry_backend
+
+      - name: Pytest — unit tests
+        # Integration tests need Postgres — skipped in this job.
+        # Add a separate job with a services.postgres block when ready.
+        run: uv run pytest tests/unit/ -v
+        env:
+          # Settings require these; values are throwaway for unit tests.
+          DATABASE_URL: postgresql+asyncpg://noop:noop@localhost:5432/noop
+          JWT_SECRET: ci-jwt-secret-32-characters-long-aaaaaaaa
+          SERVICE_TOKEN_SECRET: ci-service-token-secret-32-chars-aaaaa
+          RTSP_FERNET_KEY: gvph5V5FZ4MN2cIk7rXhFpqpxCsAYAPOTaFL8qBIBSY=
+          ENVIRONMENT: dev
+          LOG_LEVEL: WARNING

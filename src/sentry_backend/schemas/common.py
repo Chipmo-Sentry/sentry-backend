@@ -1,4 +1,5 @@
 """Common request/response schemas."""
+
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field

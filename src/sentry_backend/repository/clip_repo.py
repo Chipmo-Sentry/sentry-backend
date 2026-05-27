@@ -1,4 +1,5 @@
 """Clip CRUD."""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -8,18 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentry_backend.db.models.clip import Clip
 
 
-async def get_clip_for_org(
-    db: AsyncSession, clip_id: UUID, org_id: UUID
-) -> Clip | None:
+async def get_clip_for_org(db: AsyncSession, clip_id: UUID, org_id: UUID) -> Clip | None:
     result = await db.execute(
         select(Clip).where(Clip.id == clip_id, Clip.organization_id == org_id)
     )
     return result.scalar_one_or_none()
 
 
-async def find_clip_by_sha256_for_org(
-    db: AsyncSession, sha256: str, org_id: UUID
-) -> Clip | None:
+async def find_clip_by_sha256_for_org(db: AsyncSession, sha256: str, org_id: UUID) -> Clip | None:
     result = await db.execute(
         select(Clip).where(Clip.sha256 == sha256, Clip.organization_id == org_id)
     )

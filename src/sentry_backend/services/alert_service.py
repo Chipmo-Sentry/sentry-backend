@@ -1,4 +1,5 @@
 """Alert business logic — level derivation."""
+
 from sentry_backend.db.models.alert import AlertCategory, AlertLevel
 
 

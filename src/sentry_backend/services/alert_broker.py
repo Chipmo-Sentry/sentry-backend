@@ -3,7 +3,9 @@
 M1: single-process broker. M2+ (multi-instance backend) needs Redis pub/sub or
 similar — at that point the API is unchanged, only `_AlertBroker` swaps.
 """
+
 import asyncio
+import contextlib
 from typing import Any
 from uuid import UUID
 
@@ -21,9 +23,7 @@ class AlertBroker:
             self._subscribers.setdefault(org_id, set()).add(q)
         return q
 
-    async def unsubscribe(
-        self, org_id: UUID, q: asyncio.Queue[dict[str, Any]]
-    ) -> None:
+    async def unsubscribe(self, org_id: UUID, q: asyncio.Queue[dict[str, Any]]) -> None:
         async with self._lock:
             subs = self._subscribers.get(org_id)
             if subs is not None:
@@ -40,14 +40,10 @@ class AlertBroker:
             except asyncio.QueueFull:
                 # Drop oldest then push (back-pressure: slow clients lose old events,
                 # never block the publisher).
-                try:
+                with contextlib.suppress(asyncio.QueueEmpty):
                     q.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-                try:
+                with contextlib.suppress(asyncio.QueueFull):
                     q.put_nowait(payload)
-                except asyncio.QueueFull:
-                    pass
 
 
 _broker: AlertBroker | None = None

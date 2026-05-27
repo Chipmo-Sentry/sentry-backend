@@ -1,4 +1,5 @@
 """Cameras router — org-scoped CRUD (via Store join)."""
+
 from typing import Annotated
 from uuid import UUID
 
@@ -23,9 +24,7 @@ async def list_cameras(
     return [CameraPublic.from_orm_camera(c) for c in cams]
 
 
-@router.post(
-    "", response_model=CameraPublic, status_code=status.HTTP_201_CREATED
-)
+@router.post("", response_model=CameraPublic, status_code=status.HTTP_201_CREATED)
 async def create_camera(
     body: CameraCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -57,9 +56,7 @@ async def get_camera(
 ) -> CameraPublic:
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -72,9 +69,7 @@ async def update_camera(
 ) -> CameraPublic:
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
     cam = await camera_repo.update_camera(
         db,
         cam,
@@ -95,7 +90,5 @@ async def delete_camera(
 ) -> None:
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
     await camera_repo.delete_camera(db, cam)

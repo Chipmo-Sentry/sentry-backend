@@ -1,4 +1,5 @@
 """FastAPI application entrypoint."""
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -7,7 +8,7 @@ import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from sentry_backend import __version__
 from sentry_backend.api.v1 import alerts as alerts_v1
@@ -23,7 +24,7 @@ from sentry_backend.settings import get_settings
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     log = get_logger("sentry_backend.lifespan")
     log.info(
@@ -37,8 +38,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
-    async def dispatch(  # type: ignore[override]
-        self, request: Request, call_next  # type: ignore[no-untyped-def]
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
     ) -> Response:
         request_id = request.headers.get("x-request-id", uuid4().hex)
         structlog.contextvars.bind_contextvars(request_id=request_id)

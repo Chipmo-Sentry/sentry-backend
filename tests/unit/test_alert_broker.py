@@ -1,4 +1,5 @@
 """Unit tests for AlertBroker pub/sub."""
+
 import asyncio
 from uuid import uuid4
 

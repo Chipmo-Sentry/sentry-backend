@@ -1,0 +1,60 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.eggs
+dist
+build
+
+# Virtual envs (we rebuild inside the image)
+.venv
+venv
+env
+
+# Tooling caches
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+.uv-cache
+
+# Tests (image runs prod; tests run in CI)
+tests
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Env files (secrets — must be supplied via Railway env vars at runtime)
+.env
+.env.*
+!.env.example
+
+# Local storage
+storage
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs
+
+# Docs we don't need at runtime
+README.md
+LICENSE
+docs

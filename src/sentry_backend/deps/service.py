@@ -1,4 +1,5 @@
 """Inter-service authentication dependency (sentry-ai → sentry-backend, etc.)."""
+
 from typing import Annotated
 
 from fastapi import Header, HTTPException, status

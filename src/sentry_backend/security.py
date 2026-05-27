@@ -1,4 +1,5 @@
 """JWT, password hashing, cookies, Fernet, service tokens."""
+
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID

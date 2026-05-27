@@ -1,12 +1,12 @@
 """Alembic async-aware env, sourced from sentry_backend.settings."""
+
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
-from alembic import context
 
 # Import settings + models so target_metadata can autodiscover tables.
 from sentry_backend.db.base import Base

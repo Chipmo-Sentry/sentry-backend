@@ -1,4 +1,5 @@
 """Clip — video clip uploaded for AI analysis."""
+
 from datetime import datetime
 from uuid import UUID
 

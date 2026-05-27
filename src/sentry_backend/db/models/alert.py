@@ -1,4 +1,5 @@
 """Alert — AI verdict on a clip."""
+
 import enum
 from uuid import UUID
 
@@ -9,14 +10,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sentry_backend.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class AlertCategory(str, enum.Enum):
+class AlertCategory(enum.StrEnum):
     browsing = "browsing"
     cart_pickup = "cart_pickup"
     pocket_conceal = "pocket_conceal"
     other = "other"
 
 
-class AlertLevel(str, enum.Enum):
+class AlertLevel(enum.StrEnum):
     ignore = "ignore"
     log = "log"
     notify = "notify"

@@ -1,4 +1,5 @@
 """Clip storage + hashing helpers."""
+
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path

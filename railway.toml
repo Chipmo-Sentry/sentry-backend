@@ -1,0 +1,21 @@
+# Railway deployment config
+# https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# Required env vars (set in Railway dashboard, NEVER committed):
+#   DATABASE_URL              — provided by Railway Postgres addon
+#   JWT_SECRET                — secrets.token_urlsafe(48)
+#   SERVICE_TOKEN_SECRET      — secrets.token_urlsafe(48)
+#   RTSP_FERNET_KEY           — Fernet.generate_key().decode()
+#   ALLOWED_ORIGINS           — comma-separated, e.g. https://app.sentry.chipmo.mn
+#   ENVIRONMENT=production
+#   LOG_LEVEL=INFO

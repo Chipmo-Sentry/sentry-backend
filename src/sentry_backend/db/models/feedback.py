@@ -1,4 +1,5 @@
 """Feedback — staff TP/FP marking on an alert."""
+
 import enum
 from uuid import UUID
 
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sentry_backend.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class FeedbackVerdict(str, enum.Enum):
+class FeedbackVerdict(enum.StrEnum):
     true_positive = "true_positive"
     false_positive = "false_positive"
     unclear = "unclear"
