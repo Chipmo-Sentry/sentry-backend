@@ -1,5 +1,6 @@
 """Clips router — multipart upload + listing + download."""
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -12,6 +13,7 @@ from sentry_backend.deps.db import get_db
 from sentry_backend.deps.tenancy import get_current_organization_id
 from sentry_backend.repository import camera_repo, clip_repo
 from sentry_backend.schemas.clip import ClipPublic
+from sentry_backend.services.ai_service import verify_clip_with_ai
 from sentry_backend.services.clip_service import (
     clip_size_within_limit,
     save_upload_to_disk,
@@ -73,6 +75,12 @@ async def upload_clip(
         file_size_bytes=size_bytes,
         sha256=sha256,
     )
+
+    # Fire-and-forget: the user's upload is done; sentry-ai will verify in
+    # the background and emit an Alert via SSE when it finishes (~5-15s).
+    # The task is detached from the request so we return ClipPublic now.
+    asyncio.create_task(verify_clip_with_ai(clip.id))  # noqa: RUF006
+
     return ClipPublic.model_validate(clip)
 
 
