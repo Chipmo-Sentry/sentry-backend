@@ -153,7 +153,7 @@ async def cut_window(
 
     # Output path. Resolve to absolute so downstream services (sentry-ai
     # in a different CWD) can open the file. Tiny sync I/O.
-    out_dir = Path(settings.clip_storage_dir).resolve()
+    out_dir = Path(settings.clip_storage_dir).resolve()  # noqa: ASYNC240
     out_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
     out_name = f"live_{capture_ts_utc:%Y%m%dT%H%M%SZ}_{camera_mediamtx_path}_{uuid4().hex[:8]}.mp4"
     out_path = out_dir / out_name
