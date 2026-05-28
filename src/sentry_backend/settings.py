@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     # Default matches sentry-ai's SENTRY_BACKEND_SERVICE_TOKEN dev value.
     live_metadata_shared_secret: str = "dev-service-token"
 
+    # M1-LIVE L5: MediaMTX recordings directory (accessible from backend host).
+    # When set, threshold-breach handler can cut clips directly without an
+    # external sentry-ingest control plane. Set to None to disable L5.
+    mediamtx_recordings_dir: str | None = None
+    # Per-person cooldown after a live-threshold breach fires — debounces
+    # repeated alerts from the same suspicious moment.
+    live_breach_cooldown_sec: int = 30
+    # Per-person sustain time — risk must STAY above threshold for this long
+    # before we fire (avoids flicker on one-frame spikes).
+    live_breach_sustain_sec: float = 1.0
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @field_validator("allowed_origins", mode="before")

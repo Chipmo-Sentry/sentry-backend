@@ -24,6 +24,11 @@ class AlertLevel(enum.StrEnum):
     review = "review"
 
 
+class AlertTrigger(enum.StrEnum):
+    manual_upload = "manual_upload"   # human uploaded mp4 via /clips/upload
+    live_threshold = "live_threshold"  # live risk_pct crossed camera.risk_threshold
+
+
 class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "alerts"
 
@@ -61,3 +66,16 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Enum(AlertLevel, name="alert_level"), index=True, nullable=False
     )
     inference_latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # M1-LIVE L5: what generated this alert + tracking context
+    triggered_by: Mapped[AlertTrigger] = mapped_column(
+        Enum(AlertTrigger, name="alert_trigger"),
+        default=AlertTrigger.manual_upload,
+        server_default=AlertTrigger.manual_upload.value,
+        nullable=False,
+        index=True,
+    )
+    # When triggered_by=live_threshold: ByteTrack tracker_id that crossed threshold
+    person_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # When triggered_by=live_threshold: peak risk_pct observed for this person
+    peak_risk_pct: Mapped[float | None] = mapped_column(Float, nullable=True)

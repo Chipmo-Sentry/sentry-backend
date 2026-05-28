@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
+from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel, AlertTrigger
 
 
 async def get_alert_for_org(db: AsyncSession, alert_id: UUID, org_id: UUID) -> Alert | None:
@@ -58,6 +58,9 @@ async def create_alert(
     model_name: str,
     alert_level: AlertLevel,
     inference_latency_ms: int,
+    triggered_by: AlertTrigger = AlertTrigger.manual_upload,
+    person_id: int | None = None,
+    peak_risk_pct: float | None = None,
 ) -> Alert:
     alert = Alert(
         clip_id=clip_id,
@@ -70,6 +73,9 @@ async def create_alert(
         model_name=model_name,
         alert_level=alert_level,
         inference_latency_ms=inference_latency_ms,
+        triggered_by=triggered_by,
+        person_id=person_id,
+        peak_risk_pct=peak_risk_pct,
     )
     db.add(alert)
     await db.flush()

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from sentry_backend.db.models.alert import AlertCategory, AlertLevel
+from sentry_backend.db.models.alert import AlertCategory, AlertLevel, AlertTrigger
 
 
 class AlertPublic(BaseModel):
@@ -23,6 +23,10 @@ class AlertPublic(BaseModel):
     alert_level: AlertLevel
     inference_latency_ms: int
     created_at: datetime
+    # L5 live-threshold context (null for manual_upload alerts)
+    triggered_by: AlertTrigger = AlertTrigger.manual_upload
+    person_id: int | None = None
+    peak_risk_pct: float | None = None
 
 
 class AlertCreateInternal(BaseModel):

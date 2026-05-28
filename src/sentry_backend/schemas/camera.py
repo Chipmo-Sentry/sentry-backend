@@ -37,6 +37,9 @@ class CameraPublic(BaseModel):
     enabled: bool
     has_rtsp_url: bool
     created_at: datetime
+    # L5 live-pipeline fields
+    mediamtx_path: str | None = None
+    risk_threshold: float = 70.0
 
     @classmethod
     def from_orm_camera(cls, camera: Camera) -> "CameraPublic":
@@ -49,4 +52,6 @@ class CameraPublic(BaseModel):
             enabled=camera.enabled,
             has_rtsp_url=camera.rtsp_url_encrypted is not None,
             created_at=camera.created_at,
+            mediamtx_path=camera.mediamtx_path,
+            risk_threshold=camera.risk_threshold,
         )

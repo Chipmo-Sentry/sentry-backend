@@ -13,6 +13,7 @@ from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.live_broker import get_live_broker
+from sentry_backend.services.threshold_handler import get_threshold_handler
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/internal", tags=["internal"])
@@ -107,15 +108,18 @@ async def receive_live_metadata(
 ) -> dict[str, int]:
     """sentry-ai live worker POSTs batched per-frame metadata here.
 
-    Each frame is dispatched to subscribers of its `camera_id` (browser
-    WebSocket clients on `/ws/live/{camera_id}`).
+    Each frame is (a) dispatched to subscribers of its `camera_id` (browser
+    WebSocket clients on `/ws/live/{camera_id}`) and (b) fed through the
+    threshold handler to fire alerts on sustained risk_pct breaches (L5).
     """
     broker = get_live_broker()
+    threshold_handler = get_threshold_handler()
     published = 0
     for frame in body.frames:
         cam_id = frame.get("camera_id")
         if not isinstance(cam_id, str) or not cam_id:
             continue
         await broker.publish(cam_id, frame)
+        await threshold_handler.on_frame(frame)
         published += 1
     return {"received": len(body.frames), "published": published}

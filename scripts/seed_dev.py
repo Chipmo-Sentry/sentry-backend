@@ -15,6 +15,7 @@ import asyncio
 
 from sqlalchemy import select
 
+from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.organization import (
     Organization,
     OrganizationMember,
@@ -104,6 +105,34 @@ async def main() -> None:
             print(f"✅ Created store '{SEED_STORE_NAME}' (id={store.id})")
         else:
             print(f"ℹ️  Store '{SEED_STORE_NAME}' already exists (id={store.id})")
+
+        # M1-LIVE L5: cameras bound to MediaMTX paths so threshold handler
+        # can resolve org/store/camera UUIDs from live metadata camera_id.
+        for cam_name, mediamtx_path in [
+            ("Камер 1 — Hikvision (LAN)", "cam1_hik"),
+            ("Камер 2 — UNV (LAN)", "cam2_unv"),
+        ]:
+            existing = (
+                await db.execute(
+                    select(Camera).where(
+                        Camera.store_id == store.id,
+                        Camera.mediamtx_path == mediamtx_path,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                cam = Camera(
+                    store_id=store.id,
+                    name=cam_name,
+                    mediamtx_path=mediamtx_path,
+                    risk_threshold=70.0,
+                    enabled=True,
+                )
+                db.add(cam)
+                await db.flush()
+                print(f"✅ Created camera '{cam_name}' → mediamtx_path={mediamtx_path}")
+            else:
+                print(f"ℹ️  Camera '{cam_name}' already exists (id={existing.id})")
 
     await dispose_engine()
     print()
