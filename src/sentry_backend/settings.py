@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     sentry_ai_url: str | None = None  # e.g. http://localhost:8001 — None disables verify
     sentry_ai_timeout_sec: int = 60
 
+    # M1-LIVE L3: simple shared-secret accepted by /api/v1/internal/live-metadata
+    # (faster path than full JWT for high-volume per-frame metadata).
+    # Default matches sentry-ai's SENTRY_BACKEND_SERVICE_TOKEN dev value.
+    live_metadata_shared_secret: str = "dev-service-token"
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @field_validator("allowed_origins", mode="before")
