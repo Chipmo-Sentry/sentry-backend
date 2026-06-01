@@ -43,8 +43,10 @@ class Settings(BaseSettings):
 
     # M1-LIVE L3: simple shared-secret accepted by /api/v1/internal/live-metadata
     # (faster path than full JWT for high-volume per-frame metadata).
-    # Default matches sentry-ai's SENTRY_BACKEND_SERVICE_TOKEN dev value.
-    live_metadata_shared_secret: str = "dev-service-token"
+    # SECURITY: no hardcoded default — MUST be set via env in BOTH dev and prod
+    # (dev .env sets it to match sentry-ai's SENTRY_BACKEND_SERVICE_TOKEN).
+    # When None, the endpoint accepts only a valid service JWT.
+    live_metadata_shared_secret: str | None = None
 
     # M1-LIVE L5: MediaMTX recordings directory (accessible from backend host).
     # When set, threshold-breach handler can cut clips directly without an

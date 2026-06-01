@@ -4,18 +4,25 @@ Cookie auth (same `sentry_access` cookie as REST endpoints). The browser
 WebSocket API sends cookies automatically for same-origin / SameSite-compatible
 cross-origin connections, so no client-side header config needed.
 
-For M1 simplicity, tenancy (org → camera) is NOT enforced — any authenticated
-user can subscribe to any camera_id. M2 wires per-camera org check.
+Tenancy: the camera_id in the path is the Camera.mediamtx_path. We resolve it
+to its org (Camera → Store → Organization) and require the user to be a member
+of that org (super-admins pass). Unknown camera / non-member → 1008 close.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+from uuid import UUID
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from sentry_backend.db.models.camera import Camera
+from sentry_backend.db.models.organization import OrganizationMember
+from sentry_backend.db.models.store import Store
+from sentry_backend.db.models.user import User
 from sentry_backend.db.session import get_sessionmaker
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository.user_repo import get_user_by_id
@@ -28,28 +35,57 @@ log = get_logger("sentry_backend.ws_live")
 
 async def _resolve_user_from_token(
     sm: async_sessionmaker[AsyncSession], token: str
-) -> tuple[bool, str | None]:
-    """Validate access token + return (is_valid, user_id_str)."""
+) -> User | None:
+    """Validate access token + return the User, or None if invalid/inactive."""
     try:
         payload = decode_user_token(token)
     except ValueError:
-        return False, None
+        return None
     if payload.get("typ") != "access":
-        return False, None
+        return None
     sub = payload.get("sub")
     if not isinstance(sub, str):
-        return False, None
-    from uuid import UUID
-
+        return None
     try:
         user_id = UUID(sub)
     except ValueError:
-        return False, None
+        return None
     async with sm() as session:
         user = await get_user_by_id(session, user_id)
     if user is None or not user.is_active:
-        return False, None
-    return True, sub
+        return None
+    return user
+
+
+async def _user_may_view_camera(
+    sm: async_sessionmaker[AsyncSession], user: User, mediamtx_path: str
+) -> bool:
+    """True if the user's org owns the camera (or user is super-admin).
+
+    Resolves Camera (by mediamtx_path) → Store → org, then checks membership.
+    Unknown camera → False (don't leak existence to non-owners).
+    """
+    if user.is_super_admin:
+        return True
+    async with sm() as session:
+        org_id = (
+            await session.execute(
+                select(Store.organization_id)
+                .join(Camera, Camera.store_id == Store.id)
+                .where(Camera.mediamtx_path == mediamtx_path)
+            )
+        ).scalar_one_or_none()
+        if org_id is None:
+            return False
+        is_member = (
+            await session.execute(
+                select(OrganizationMember.user_id).where(
+                    OrganizationMember.user_id == user.id,
+                    OrganizationMember.organization_id == org_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return is_member is not None
 
 
 @router.websocket("/ws/live/{camera_id}")
@@ -69,10 +105,16 @@ async def ws_live(
         return
 
     sm = get_sessionmaker()
-    ok, user_sub = await _resolve_user_from_token(sm, sentry_access)
-    if not ok:
+    user = await _resolve_user_from_token(sm, sentry_access)
+    if user is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid token")
         return
+
+    # Tenancy: camera_id == Camera.mediamtx_path; require org membership.
+    if not await _user_may_view_camera(sm, user, camera_id):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="forbidden")
+        return
+    user_sub = str(user.id)
 
     broker = get_live_broker()
     queue = await broker.subscribe(camera_id)

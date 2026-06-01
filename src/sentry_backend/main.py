@@ -35,6 +35,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         version=__version__,
         environment=get_settings().environment,
     )
+    # P3: re-push camera paths to MediaMTX so the live pipeline recovers after
+    # a reboot without manual re-registration. Best-effort — never blocks boot.
+    try:
+        from sentry_backend.services.mediamtx_sync import rehydrate_paths
+
+        await rehydrate_paths()
+    except Exception:  # noqa: BLE001
+        log.warning("mediamtx_rehydrate_failed", exc_info=True)
     yield
     log.info("stopping")
     await dispose_engine()
