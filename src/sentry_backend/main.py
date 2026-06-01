@@ -43,6 +43,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await rehydrate_paths()
     except Exception:  # noqa: BLE001
         log.warning("mediamtx_rehydrate_failed", exc_info=True)
+    # First-run super-admin bootstrap from env (idempotent, best-effort).
+    try:
+        from sentry_backend.services.bootstrap import bootstrap_superadmin
+
+        await bootstrap_superadmin()
+    except Exception:  # noqa: BLE001
+        log.warning("bootstrap_superadmin_failed", exc_info=True)
     yield
     log.info("stopping")
     await dispose_engine()

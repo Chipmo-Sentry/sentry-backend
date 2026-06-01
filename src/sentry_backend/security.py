@@ -114,7 +114,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
     # SameSite=None is only valid on a Secure cookie; force secure in that case
     # (also secure in production regardless).
     secure = settings.environment == "production" or samesite == "none"
-    domain = settings.cookie_domain
+    domain = settings.cookie_domain or None  # empty string → host-only cookie
     response.set_cookie(
         ACCESS_COOKIE_NAME,
         access_token,
@@ -139,7 +139,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
 
 def clear_auth_cookies(response: Response) -> None:
     settings = get_settings()
-    domain = settings.cookie_domain
+    domain = settings.cookie_domain or None
     response.delete_cookie(ACCESS_COOKIE_NAME, path="/", domain=domain)
     response.delete_cookie(REFRESH_COOKIE_NAME, path="/api/v1/auth", domain=domain)
 

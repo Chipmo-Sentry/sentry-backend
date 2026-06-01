@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     cookie_domain: str | None = None
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
+    # First-run super-admin bootstrap (idempotent). When both are set and no
+    # super-admin exists, one is created on startup — seeds a deployment with
+    # no shell/DB access. No-ops once the user exists.
+    bootstrap_superadmin_email: str | None = None
+    bootstrap_superadmin_password: SecretStr | None = None
+    bootstrap_org_name: str = "Demo Retail Group"
+    bootstrap_org_slug: str = "demo-retail"
+
     clip_storage_dir: str = "./storage/clips"
     max_clip_size_mb: int = 100
 
