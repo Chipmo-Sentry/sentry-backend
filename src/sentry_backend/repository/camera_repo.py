@@ -1,5 +1,6 @@
 """Camera CRUD — joins via Store for org-scoping."""
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -54,10 +55,19 @@ async def create_camera(
     shelf_zone_json: dict[str, Any] | None,
     stage2_threshold: float,
     enabled: bool,
+    mediamtx_path: str | None = None,
+    risk_threshold: float = 70.0,
 ) -> Camera | None:
-    """Return None if the store doesn't belong to the org (404 surfaced by caller)."""
+    """Return None if the store doesn't belong to the org (404 surfaced by caller).
+
+    If `mediamtx_path` is None, generate from `name`. If the chosen slug collides
+    with an existing camera, append numeric suffix until unique.
+    """
     if not await store_belongs_to_org(db, store_id, org_id):
         return None
+
+    path = await _allocate_mediamtx_path(db, mediamtx_path or _slugify(name))
+
     cam = Camera(
         store_id=store_id,
         name=name,
@@ -65,10 +75,34 @@ async def create_camera(
         shelf_zone_json=shelf_zone_json,
         stage2_threshold=stage2_threshold,
         enabled=enabled,
+        mediamtx_path=path,
+        risk_threshold=risk_threshold,
     )
     db.add(cam)
     await db.flush()
     return cam
+
+
+def _slugify(text: str) -> str:
+    """ASCII-only slug for mediamtx_path. Falls back to 'cam' if all stripped."""
+    s = re.sub(r"[^a-zA-Z0-9_]+", "_", text.strip().lower()).strip("_")
+    return s[:50] or "cam"
+
+
+async def _allocate_mediamtx_path(db: AsyncSession, preferred: str) -> str:
+    """Return `preferred` if unused; otherwise append _2, _3, ... until unique."""
+    taken_rows = await db.execute(
+        select(Camera.mediamtx_path).where(Camera.mediamtx_path.is_not(None))
+    )
+    taken = {row[0] for row in taken_rows.all()}
+    if preferred not in taken:
+        return preferred
+    i = 2
+    while True:
+        candidate = f"{preferred}_{i}"
+        if candidate not in taken:
+            return candidate
+        i += 1
 
 
 async def update_camera(
@@ -80,6 +114,8 @@ async def update_camera(
     shelf_zone_json: dict[str, Any] | None = None,
     stage2_threshold: float | None = None,
     enabled: bool | None = None,
+    mediamtx_path: str | None = None,
+    risk_threshold: float | None = None,
 ) -> Camera:
     if name is not None:
         camera.name = name
@@ -91,8 +127,25 @@ async def update_camera(
         camera.stage2_threshold = stage2_threshold
     if enabled is not None:
         camera.enabled = enabled
+    if mediamtx_path is not None and mediamtx_path != camera.mediamtx_path:
+        # Ensure uniqueness on update too
+        camera.mediamtx_path = await _allocate_mediamtx_path(db, mediamtx_path)
+    if risk_threshold is not None:
+        camera.risk_threshold = risk_threshold
     await db.flush()
     return camera
+
+
+async def decrypt_rtsp_url(camera: Camera) -> str | None:
+    """Helper: decrypt the stored RTSP URL (sync, no DB).
+
+    Returns None if the camera has no stored URL.
+    """
+    from sentry_backend.security import decrypt_secret
+
+    if camera.rtsp_url_encrypted is None:
+        return None
+    return decrypt_secret(camera.rtsp_url_encrypted)
 
 
 async def delete_camera(db: AsyncSession, camera: Camera) -> None:

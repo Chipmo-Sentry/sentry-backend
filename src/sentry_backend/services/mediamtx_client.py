@@ -1,0 +1,118 @@
+"""MediaMTX dynamic path config — POST/DELETE camera paths.
+
+MediaMTX 1.18+ accepts path config updates via:
+  POST   /v3/config/paths/add/{name}     body: {"source":..., ...}
+  PATCH  /v3/config/paths/patch/{name}   body: {"source":...}
+  DELETE /v3/config/paths/delete/{name}
+
+For M1.5 (local laptop), backend has direct HTTP access to MediaMTX's
+admin port (default 127.0.0.1:9997). For M2 production, MediaMTX runs
+on Hetzner; backend uses MEDIAMTX_API_URL env + optional bearer token.
+
+Failures here MUST NOT block camera CRUD — they're best-effort sync.
+The path is also persisted in mediamtx.yml if MediaMTX is misconfigured
+or unreachable; an operator can re-run `mediamtx restart` to pick up
+all camera rows from the DB-driven config. (M2: backend will rehydrate
+MediaMTX on startup from the Camera table.)
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+from sentry_backend.logging_setup import get_logger
+from sentry_backend.settings import get_settings
+
+log = get_logger("sentry_backend.mediamtx_client")
+
+DEFAULT_PATH_CONFIG: dict[str, Any] = {
+    "sourceProtocol": "tcp",
+    "sourceOnDemand": False,
+    "record": True,
+}
+
+
+def _api_base() -> str | None:
+    return get_settings().mediamtx_api_url
+
+
+def _headers() -> dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    token = get_settings().mediamtx_api_token
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    return h
+
+
+async def add_path(name: str, rtsp_source: str) -> bool:
+    """Register a new MediaMTX source for `name` pointing at `rtsp_source`.
+
+    Returns True on success. Never raises — logs and returns False instead.
+    Idempotency: if MediaMTX returns "already exists" (400), we PATCH instead.
+    """
+    base = _api_base()
+    if not base:
+        log.debug("mediamtx.api_disabled", reason="MEDIAMTX_API_URL not set")
+        return False
+
+    payload = {**DEFAULT_PATH_CONFIG, "source": rtsp_source}
+    url = f"{base.rstrip('/')}/v3/config/paths/add/{name}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(url, json=payload, headers=_headers())
+        if r.status_code in (200, 201):
+            log.info("mediamtx.add_ok", path=name)
+            return True
+        if r.status_code == 400 and "already exists" in r.text.lower():
+            log.info("mediamtx.add_exists_patching", path=name)
+            return await patch_path(name, rtsp_source)
+        log.warning(
+            "mediamtx.add_failed", path=name, status=r.status_code, body=r.text[:200]
+        )
+    except (httpx.HTTPError, TimeoutError) as e:
+        log.warning("mediamtx.add_http_err", path=name, error=str(e))
+    return False
+
+
+async def patch_path(name: str, rtsp_source: str) -> bool:
+    base = _api_base()
+    if not base:
+        return False
+    payload = {**DEFAULT_PATH_CONFIG, "source": rtsp_source}
+    url = f"{base.rstrip('/')}/v3/config/paths/patch/{name}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.patch(url, json=payload, headers=_headers())
+        if r.status_code in (200, 204):
+            log.info("mediamtx.patch_ok", path=name)
+            return True
+        log.warning(
+            "mediamtx.patch_failed", path=name, status=r.status_code, body=r.text[:200]
+        )
+    except (httpx.HTTPError, TimeoutError) as e:
+        log.warning("mediamtx.patch_http_err", path=name, error=str(e))
+    return False
+
+
+async def delete_path(name: str) -> bool:
+    base = _api_base()
+    if not base:
+        return False
+    url = f"{base.rstrip('/')}/v3/config/paths/delete/{name}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.delete(url, headers=_headers())
+        if r.status_code in (200, 204):
+            log.info("mediamtx.delete_ok", path=name)
+            return True
+        if r.status_code == 404:
+            log.info("mediamtx.delete_not_found", path=name)
+            return True  # already gone, treat as success
+        log.warning(
+            "mediamtx.delete_failed", path=name, status=r.status_code, body=r.text[:200]
+        )
+    except (httpx.HTTPError, TimeoutError) as e:
+        log.warning("mediamtx.delete_http_err", path=name, error=str(e))
+    return False

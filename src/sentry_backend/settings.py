@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # When set, threshold-breach handler can cut clips directly without an
     # external sentry-ingest control plane. Set to None to disable L5.
     mediamtx_recordings_dir: str | None = None
+
+    # M1.5 AG8: MediaMTX admin API URL for dynamic path config (camera register).
+    # Set to None to disable — Camera CRUD still succeeds, just doesn't sync to
+    # MediaMTX (an operator can `mediamtx restart` to pick up paths from yml).
+    mediamtx_api_url: str | None = "http://127.0.0.1:9997"
+    mediamtx_api_token: str | None = None
     # Per-person cooldown after a live-threshold breach fires — debounces
     # repeated alerts from the same suspicious moment.
     live_breach_cooldown_sec: int = 30

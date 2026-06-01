@@ -10,6 +10,7 @@ from sentry_backend.deps.db import get_db
 from sentry_backend.deps.tenancy import get_current_organization_id
 from sentry_backend.repository import camera_repo
 from sentry_backend.schemas.camera import CameraCreate, CameraPublic, CameraUpdate
+from sentry_backend.services import mediamtx_client
 
 router = APIRouter(prefix="/api/v1/cameras", tags=["cameras"])
 
@@ -39,12 +40,19 @@ async def create_camera(
         shelf_zone_json=body.shelf_zone_json,
         stage2_threshold=body.stage2_threshold,
         enabled=body.enabled,
+        mediamtx_path=body.mediamtx_path,
+        risk_threshold=body.risk_threshold,
     )
     if cam is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Store not found or not in your organization",
         )
+    # Commit before MediaMTX sync so the path exists in DB even if MediaMTX
+    # is unreachable (operator can restart MediaMTX to pick up later).
+    await db.commit()
+    if cam.mediamtx_path and body.rtsp_url and cam.enabled:
+        await mediamtx_client.add_path(cam.mediamtx_path, body.rtsp_url)
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -70,6 +78,7 @@ async def update_camera(
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+    old_path = cam.mediamtx_path
     cam = await camera_repo.update_camera(
         db,
         cam,
@@ -78,7 +87,20 @@ async def update_camera(
         shelf_zone_json=body.shelf_zone_json,
         stage2_threshold=body.stage2_threshold,
         enabled=body.enabled,
+        mediamtx_path=body.mediamtx_path,
+        risk_threshold=body.risk_threshold,
     )
+    await db.commit()
+
+    # MediaMTX sync: rename path if changed, PATCH source if URL changed.
+    if old_path and old_path != cam.mediamtx_path:
+        await mediamtx_client.delete_path(old_path)
+    if cam.mediamtx_path and cam.enabled:
+        rtsp = await camera_repo.decrypt_rtsp_url(cam)
+        if rtsp:
+            await mediamtx_client.add_path(cam.mediamtx_path, rtsp)
+    elif cam.mediamtx_path and not cam.enabled:
+        await mediamtx_client.delete_path(cam.mediamtx_path)
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -91,4 +113,8 @@ async def delete_camera(
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+    path = cam.mediamtx_path
     await camera_repo.delete_camera(db, cam)
+    await db.commit()
+    if path:
+        await mediamtx_client.delete_path(path)
