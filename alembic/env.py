@@ -25,7 +25,10 @@ from sentry_backend.settings import get_settings
 config = context.config
 
 # Override sqlalchemy.url from settings (so we never commit secrets to alembic.ini)
-config.set_main_option("sqlalchemy.url", str(get_settings().database_url))
+# `%` must be doubled to escape configparser interpolation (URL-encoded chars
+# in the password, e.g. `%40` for `@`, would otherwise raise on set).
+_db_url = str(get_settings().database_url).replace("%", "%%")
+config.set_main_option("sqlalchemy.url", _db_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
