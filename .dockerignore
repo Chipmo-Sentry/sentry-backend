@@ -54,7 +54,8 @@ storage
 *.log
 logs
 
-# Docs we don't need at runtime
-README.md
+# Docs we don't need at runtime.
+# NOTE: README.md is intentionally NOT ignored — hatchling reads it as the
+# project readme during `uv sync` (editable build) inside the image.
 LICENSE
 docs
