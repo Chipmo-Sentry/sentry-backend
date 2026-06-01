@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -248,8 +248,6 @@ async def patch_behavior_config(
     if body.thresholds:
         new_t = {**thresholds, **body.thresholds}
         if new_t["green_max"] >= new_t["yellow_max"]:
-            from fastapi import HTTPException, status
-
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="green_max must be < yellow_max",

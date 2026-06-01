@@ -92,12 +92,16 @@ class ThresholdHandler:
             return
 
         now = time.monotonic()
-        threshold = float(camera.risk_threshold)
+        # As of behaviors-PATCH commit: scores are absolute (unbounded) and the
+        # color band is driven by the global behavior config's yellow_max.
+        # Alerts fire on color=red — keeps L5 trigger in sync with the UI's
+        # color thresholds (no separate per-camera risk_threshold).
 
         async with self._lock:
             for t in tracks:
                 pid = t.get("person_id")
                 risk = t.get("risk_pct")
+                color = t.get("color")
                 if not isinstance(pid, int) or not isinstance(risk, (int, float)):
                     continue
                 key = (cam_path, pid)
@@ -112,7 +116,7 @@ class ThresholdHandler:
                 if now - st.last_breach_ts < settings.live_breach_cooldown_sec:
                     continue
 
-                if st.risk_pct >= threshold:
+                if color == "red":
                     if st.above_threshold_since is None:
                         st.above_threshold_since = now
                     elif (
@@ -161,7 +165,6 @@ class ThresholdHandler:
             camera_path=cam_path,
             person_id=person_id,
             peak_risk_pct=peak_risk_pct,
-            threshold=camera.risk_threshold,
         )
 
         # 1. Cut the clip from MediaMTX recordings
