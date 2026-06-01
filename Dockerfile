@@ -14,8 +14,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.16 /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
-# Install deps WITHOUT installing the project (better layer cache)
-COPY pyproject.toml uv.lock ./
+# Install deps WITHOUT installing the project (better layer cache).
+# README.md is required by hatchling metadata when building the project.
+COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Now copy source + install the project itself
