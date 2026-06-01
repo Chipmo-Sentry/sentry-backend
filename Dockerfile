@@ -16,12 +16,12 @@ WORKDIR /app
 
 # Install deps WITHOUT installing the project (better layer cache)
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=uv,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 # Now copy source + install the project itself
 COPY src ./src
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=uv,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 # ============================================================================
