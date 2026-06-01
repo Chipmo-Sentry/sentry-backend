@@ -47,12 +47,20 @@ from sentry_backend.settings import get_settings
 log = get_logger("sentry_backend.threshold_handler")
 
 
+# Drop per-person state unseen for this long. ByteTrack assigns new IDs as
+# people enter/leave, so without pruning the _state dict grows unbounded over
+# a long run (e.g. the 1-hour continuous test).
+_STATE_TTL_SEC = 300.0
+_CLEANUP_EVERY_SEC = 60.0
+
+
 @dataclass(slots=True)
 class _PersonState:
     risk_pct: float = 0.0
     peak_risk_pct: float = 0.0
     above_threshold_since: float | None = None  # monotonic ts when we first crossed
     last_breach_ts: float = 0.0                  # cooldown anchor
+    last_seen: float = 0.0                        # monotonic ts of last frame
 
 
 class ThresholdHandler:
@@ -62,6 +70,7 @@ class ThresholdHandler:
         self._lock = asyncio.Lock()
         # In-flight breach tasks per camera to avoid spawning duplicates
         self._inflight: set[tuple[str, int]] = set()
+        self._last_cleanup: float = 0.0
 
     async def on_frame(self, frame: dict[str, Any]) -> None:
         """Called from POST /api/v1/internal/live-metadata for each frame.
@@ -98,6 +107,7 @@ class ThresholdHandler:
         # color thresholds (no separate per-camera risk_threshold).
 
         async with self._lock:
+            self._maybe_cleanup(now)
             for t in tracks:
                 pid = t.get("person_id")
                 risk = t.get("risk_pct")
@@ -111,6 +121,7 @@ class ThresholdHandler:
                     self._state[key] = st
                 st.risk_pct = float(risk)
                 st.peak_risk_pct = max(st.peak_risk_pct, st.risk_pct)
+                st.last_seen = now
 
                 # Cooldown still active → don't fire
                 if now - st.last_breach_ts < settings.live_breach_cooldown_sec:
@@ -132,6 +143,23 @@ class ThresholdHandler:
                         asyncio.create_task(self._handle_breach(camera, pid, peak, key))
                 else:
                     st.above_threshold_since = None
+
+    def _maybe_cleanup(self, now: float) -> None:
+        """Prune person states unseen past _STATE_TTL_SEC. Caller holds the lock.
+
+        Runs at most once per _CLEANUP_EVERY_SEC. Also clears any orphaned
+        _inflight keys whose state has been pruned (defensive — _handle_breach
+        normally discards them).
+        """
+        if now - self._last_cleanup < _CLEANUP_EVERY_SEC:
+            return
+        self._last_cleanup = now
+        stale = [k for k, st in self._state.items() if now - st.last_seen > _STATE_TTL_SEC]
+        for k in stale:
+            del self._state[k]
+            self._inflight.discard(k)
+        if stale:
+            log.debug("threshold_handler.cleanup", pruned=len(stale), remaining=len(self._state))
 
     async def _handle_breach(
         self,

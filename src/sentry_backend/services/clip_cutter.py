@@ -29,6 +29,13 @@ log = get_logger("sentry_backend.clip_cutter")
 # MediaMTX fmp4 segment filenames: "2026-05-28_14-58-34-265139.mp4"
 _TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-\d+)?)")
 
+# Upper bound for how long we assume the LAST (currently-recording) segment
+# runs. MediaMTX writes 60-sec segments (recordSegmentDuration), so the active
+# one is at most ~60s long; we use 2× as slack. This prevents an ancient stale
+# segment (left over from a camera disconnect) from matching a current window
+# just because it happens to be the most recent file on disk.
+_MAX_SEGMENT_SEC = 120
+
 
 @dataclass(slots=True)
 class CutResult:
@@ -92,12 +99,17 @@ def _find_segments_in_window(
         segments.append((ts, p))
     segments.sort(key=lambda x: x[0])
 
-    # A segment overlaps the window if it starts before window_end AND
-    # the next segment's start (or 'forever') is after window_start.
+    # A segment overlaps the window if it starts before window_end AND its
+    # effective end is after window_start. A segment's end = the next segment's
+    # start; for the LAST segment we cap the assumed end at +_MAX_SEGMENT_SEC
+    # (not "forever") so a stale leftover file can't match a current window.
     overlapping: list[Path] = []
     for i, (ts, path) in enumerate(segments):
-        next_ts = segments[i + 1][0] if i + 1 < len(segments) else window_end + timedelta(hours=1)
-        if ts < window_end and next_ts > window_start:
+        if i + 1 < len(segments):
+            seg_end = segments[i + 1][0]
+        else:
+            seg_end = ts + timedelta(seconds=_MAX_SEGMENT_SEC)
+        if ts < window_end and seg_end > window_start:
             overlapping.append(path)
     return overlapping
 

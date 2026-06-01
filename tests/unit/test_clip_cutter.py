@@ -98,3 +98,35 @@ def test_find_segments_missing_dir(tmp_path: Path) -> None:
         tmp_path / "nonexistent", datetime.now(), datetime.now(),
     )
     assert segs == []
+
+
+def test_stale_last_segment_excluded(tmp_path: Path) -> None:
+    """An ancient leftover segment must NOT match a current window.
+
+    Regression guard for the camera-reconnect case: if the camera was offline
+    and left one old segment, a breach 'now' should find nothing (not the
+    stale file) — the last segment's assumed end is capped at _MAX_SEGMENT_SEC.
+    """
+    cam_dir = tmp_path / "cam_stale"
+    cam_dir.mkdir()
+    # A single segment recorded an hour ago
+    (cam_dir / "2026-05-28_13-00-00-000000.mp4").write_bytes(b"x")
+
+    # Window is "now" — an hour later
+    start = datetime(2026, 5, 28, 14, 0, 0)
+    end = start + timedelta(seconds=15)
+    segs = clip_cutter._find_segments_in_window(cam_dir, start, end)
+    assert segs == []  # stale segment correctly excluded
+
+
+def test_current_last_segment_included(tmp_path: Path) -> None:
+    """The actively-recording last segment (started <60s ago) IS included."""
+    cam_dir = tmp_path / "cam_live"
+    cam_dir.mkdir()
+    # Last segment started 20 sec before the window
+    (cam_dir / "2026-05-28_13-59-40-000000.mp4").write_bytes(b"x")
+
+    start = datetime(2026, 5, 28, 14, 0, 0)
+    end = start + timedelta(seconds=15)
+    segs = clip_cutter._find_segments_in_window(cam_dir, start, end)
+    assert len(segs) == 1
