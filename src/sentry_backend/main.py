@@ -66,15 +66,36 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    is_prod = settings.environment == "production"
+
+    # Interactive API docs + schema are useful in dev but are unnecessary
+    # attack/recon surface on a public production deployment.
     app = FastAPI(
         title="Chipmo Sentry Backend",
         version=__version__,
         lifespan=lifespan,
+        docs_url=None if is_prod else "/docs",
+        redoc_url=None if is_prod else "/redoc",
+        openapi_url=None if is_prod else "/openapi.json",
     )
+
+    # CORS must fail CLOSED with credentials. A wildcard origin combined with
+    # allow_credentials is the classic credentialed-CORS hole — and in prod a
+    # missing ALLOWED_ORIGINS should be a hard error, never "allow everyone".
+    if not settings.allowed_origins:
+        if is_prod:
+            raise RuntimeError(
+                "ALLOWED_ORIGINS must be set in production (refusing to start "
+                "with an open credentialed CORS policy)."
+            )
+        # dev convenience only
+        cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+    else:
+        cors_origins = settings.allowed_origins
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.allowed_origins or ["*"],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

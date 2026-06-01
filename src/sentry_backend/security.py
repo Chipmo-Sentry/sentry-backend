@@ -110,13 +110,18 @@ REFRESH_COOKIE_NAME = "sentry_refresh"
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
     settings = get_settings()
-    is_prod = settings.environment == "production"
+    samesite = settings.cookie_samesite
+    # SameSite=None is only valid on a Secure cookie; force secure in that case
+    # (also secure in production regardless).
+    secure = settings.environment == "production" or samesite == "none"
+    domain = settings.cookie_domain
     response.set_cookie(
         ACCESS_COOKIE_NAME,
         access_token,
         httponly=True,
-        secure=is_prod,
-        samesite="lax",
+        secure=secure,
+        samesite=samesite,
+        domain=domain,
         max_age=settings.jwt_access_ttl_minutes * 60,
         path="/",
     )
@@ -124,16 +129,19 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
         REFRESH_COOKIE_NAME,
         refresh_token,
         httponly=True,
-        secure=is_prod,
-        samesite="lax",
+        secure=secure,
+        samesite=samesite,
+        domain=domain,
         max_age=settings.jwt_refresh_ttl_days * 86400,
         path="/api/v1/auth",
     )
 
 
 def clear_auth_cookies(response: Response) -> None:
-    response.delete_cookie(ACCESS_COOKIE_NAME, path="/")
-    response.delete_cookie(REFRESH_COOKIE_NAME, path="/api/v1/auth")
+    settings = get_settings()
+    domain = settings.cookie_domain
+    response.delete_cookie(ACCESS_COOKIE_NAME, path="/", domain=domain)
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/api/v1/auth", domain=domain)
 
 
 def _get_fernet() -> Fernet:

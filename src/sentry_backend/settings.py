@@ -35,6 +35,13 @@ class Settings(BaseSettings):
 
     allowed_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # Auth cookie scoping. To support split-subdomain SPAs (app./admin. talking
+    # to api.) set cookie_domain=".sentry.chipmo.mn" and cookie_samesite="none"
+    # (None requires HTTPS; `secure` is forced on when samesite=none). Defaults
+    # keep same-origin/localhost behavior unchanged.
+    cookie_domain: str | None = None
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+
     clip_storage_dir: str = "./storage/clips"
     max_clip_size_mb: int = 100
 

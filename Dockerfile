@@ -47,8 +47,11 @@ COPY --from=builder /app/src ./src
 COPY alembic.ini ./
 COPY alembic ./alembic
 
-# Storage dir for clip uploads (M1: local fs; M2+: S3/B2)
-RUN mkdir -p /app/storage/clips
+# Non-root runtime user; storage dir must be writable by it.
+RUN addgroup --system app && adduser --system --ingroup app app \
+    && mkdir -p /app/storage/clips \
+    && chown -R app:app /app/storage
+USER app
 
 EXPOSE 8000
 

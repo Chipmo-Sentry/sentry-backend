@@ -1,5 +1,6 @@
 """Internal endpoints — service-to-service (e.g. sentry-ai → backend)."""
 
+import hmac
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -95,7 +96,7 @@ async def _require_simple_internal_token(
     expected = settings.live_metadata_shared_secret
     if expected and authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(maxsplit=1)[1]
-        if token == expected:
+        if hmac.compare_digest(token, expected):
             return
     # Fall back to JWT path
     await require_service_token(authorization)
