@@ -60,6 +60,6 @@ class AgentStreamConfig(BaseModel):
     """
 
     push_enabled: bool
-    push_rtsp_base: str | None = None     # e.g. "rtsp://media.sentry.chipmo.mn:8554"
+    push_rtsp_base: str | None = None  # e.g. "rtsp://media.sentry.chipmo.mn:8554"
     publish_user: str | None = None
     publish_pass: str | None = None

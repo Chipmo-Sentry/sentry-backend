@@ -49,8 +49,9 @@ async def start_worker(mediamtx_path: str) -> bool:
         if r.status_code in (200, 202):
             log.info("live_ai.start_ok", camera_id=mediamtx_path)
             return True
-        log.warning("live_ai.start_failed", camera_id=mediamtx_path, status=r.status_code,
-                    body=r.text[:200])
+        log.warning(
+            "live_ai.start_failed", camera_id=mediamtx_path, status=r.status_code, body=r.text[:200]
+        )
     except (httpx.HTTPError, TimeoutError) as e:
         log.warning("live_ai.start_http_err", camera_id=mediamtx_path, error=str(e))
     return False
