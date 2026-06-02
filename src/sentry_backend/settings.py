@@ -99,6 +99,15 @@ class Settings(BaseSettings):
     # before we fire (avoids flicker on one-frame spikes).
     live_breach_sustain_sec: float = 1.0
 
+    # LD.1: founder notification for new landing leads. When both are set, a
+    # new demo request pings this Telegram chat; otherwise leads are only
+    # persisted + logged. Best-effort — never blocks the public form submit.
+    telegram_bot_token: SecretStr | None = None
+    telegram_chat_id: str | None = None
+
+    # LD.2: per-IP rate limit on the public POST /api/v1/leads endpoint.
+    lead_rate_limit: str = "5/hour"
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @field_validator("allowed_origins", mode="before")

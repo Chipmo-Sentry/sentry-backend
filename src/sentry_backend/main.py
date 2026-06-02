@@ -21,9 +21,11 @@ from sentry_backend.api.v1 import cameras as cameras_v1
 from sentry_backend.api.v1 import clips as clips_v1
 from sentry_backend.api.v1 import feedback as feedback_v1
 from sentry_backend.api.v1 import internal as internal_v1
+from sentry_backend.api.v1 import leads as leads_v1
 from sentry_backend.api.v1 import stores as stores_v1
 from sentry_backend.db.session import dispose_engine, get_sessionmaker
 from sentry_backend.logging_setup import configure_logging, get_logger
+from sentry_backend.ratelimit import limiter
 from sentry_backend.settings import get_settings
 
 
@@ -87,6 +89,15 @@ def create_app() -> FastAPI:
         openapi_url=None if is_prod else "/openapi.json",
     )
 
+    # LD.2: per-IP rate limiting (currently only the public /leads endpoint).
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+
+    app.state.limiter = limiter
+    # slowapi's handler signature is narrower than Starlette's generic
+    # Exception handler type; safe to register.
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
     # CORS must fail CLOSED with credentials. A wildcard origin combined with
     # allow_credentials is the classic credentialed-CORS hole — and in prod a
     # missing ALLOWED_ORIGINS should be a hard error, never "allow everyone".
@@ -123,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(clips_v1.router)
     app.include_router(alerts_v1.router)
     app.include_router(feedback_v1.router)
+    app.include_router(leads_v1.router)
     app.include_router(internal_v1.router)
     app.include_router(admin_v1.router)
     app.include_router(agents_v1.router)

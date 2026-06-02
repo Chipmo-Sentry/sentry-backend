@@ -14,7 +14,7 @@ from sentry_backend.db.models.store import Store
 from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import require_super_admin
 from sentry_backend.deps.db import get_db
-from sentry_backend.repository import org_repo, user_repo
+from sentry_backend.repository import lead_repo, org_repo, user_repo
 from sentry_backend.schemas.admin import (
     AdminStats,
     OrgMemberPublic,
@@ -22,6 +22,7 @@ from sentry_backend.schemas.admin import (
     would_self_lockout,
 )
 from sentry_backend.schemas.auth import UserPublic
+from sentry_backend.schemas.lead import LeadPublic, LeadUpdate
 from sentry_backend.schemas.org import (
     OrganizationCreate,
     OrganizationPublic,
@@ -194,3 +195,28 @@ async def update_user(
         is_super_admin=body.is_super_admin,
     )
     return UserPublic.model_validate(user)
+
+
+@router.get("/leads", response_model=list[LeadPublic])
+async def list_leads(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+    limit: int = 200,
+    offset: int = 0,
+) -> list[LeadPublic]:
+    leads = await lead_repo.list_leads(db, limit=min(limit, 500), offset=max(offset, 0))
+    return [LeadPublic.model_validate(lead) for lead in leads]
+
+
+@router.patch("/leads/{lead_id}", response_model=LeadPublic)
+async def update_lead(
+    lead_id: UUID,
+    body: LeadUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> LeadPublic:
+    lead = await lead_repo.get_lead(db, lead_id)
+    if lead is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    lead = await lead_repo.update_lead(db, lead, status=body.status, notes=body.notes)
+    return LeadPublic.model_validate(lead)

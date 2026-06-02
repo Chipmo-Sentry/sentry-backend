@@ -6,6 +6,7 @@ from sentry_backend.db.models.app_config import AppConfig
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.clip import Clip
 from sentry_backend.db.models.feedback import Feedback, FeedbackVerdict
+from sentry_backend.db.models.lead import Lead, LeadStatus
 from sentry_backend.db.models.organization import (
     Organization,
     OrganizationMember,
@@ -25,6 +26,8 @@ __all__ = [
     "Clip",
     "Feedback",
     "FeedbackVerdict",
+    "Lead",
+    "LeadStatus",
     "Organization",
     "OrganizationMember",
     "OrgRole",
