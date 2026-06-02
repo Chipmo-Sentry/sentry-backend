@@ -25,11 +25,13 @@ from sentry_backend.schemas.agent import (
     AgentPairRequest,
     AgentPairResult,
     AgentPublic,
+    AgentStreamConfig,
     PairingCodePublic,
 )
 from sentry_backend.schemas.camera import CameraPublic
 from sentry_backend.security import create_agent_token
-from sentry_backend.services import mediamtx_client
+from sentry_backend.services import live_provision
+from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
@@ -177,8 +179,8 @@ async def agent_register_camera(
         )
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()
-    if cam.mediamtx_path and body.rtsp_url and cam.enabled:
-        await mediamtx_client.add_path(cam.mediamtx_path, body.rtsp_url)
+    if cam.mediamtx_path and body.rtsp_url:
+        await live_provision.provision(cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled)
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -196,7 +198,26 @@ async def agent_delete_camera(
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()
     if path:
-        await mediamtx_client.delete_path(path)
+        await live_provision.deprovision(path)
+
+
+@router.get("/agent/stream-config", response_model=AgentStreamConfig)
+async def agent_stream_config(
+    _agent: Annotated[Agent, Depends(get_current_agent)],
+) -> AgentStreamConfig:
+    """Tell a paired agent where (and whether) to publish its camera streams.
+
+    push_enabled=True → cloud topology: the agent runs ffmpeg relays pushing
+    each LAN camera to `push_rtsp_base/<mediamtx_path>`. False → MediaMTX pulls
+    cameras directly (local/on-LAN) and the agent pushes nothing.
+    """
+    s = get_settings()
+    return AgentStreamConfig(
+        push_enabled=bool(s.agent_stream_push_url),
+        push_rtsp_base=s.agent_stream_push_url,
+        publish_user=s.mediamtx_publish_user,
+        publish_pass=s.mediamtx_publish_pass,
+    )
 
 
 @router.post("/agent/heartbeat", status_code=status.HTTP_204_NO_CONTENT)

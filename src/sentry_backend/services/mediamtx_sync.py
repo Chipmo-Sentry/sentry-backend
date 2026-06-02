@@ -19,7 +19,7 @@ from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.session import session_scope
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import camera_repo
-from sentry_backend.services import mediamtx_client
+from sentry_backend.services import live_ai_client, mediamtx_client
 from sentry_backend.settings import get_settings
 
 log = get_logger("sentry_backend.mediamtx_sync")
@@ -60,5 +60,8 @@ async def rehydrate_paths() -> int:
     for path, rtsp in to_sync:
         if await mediamtx_client.add_path(path, rtsp):
             added += 1
+        # Also restart the AI live worker for this camera (best-effort) so the
+        # detection overlay recovers, not just the video stream.
+        await live_ai_client.start_worker(path)
     log.info("mediamtx_sync.rehydrated", total=len(to_sync), added=added)
     return added

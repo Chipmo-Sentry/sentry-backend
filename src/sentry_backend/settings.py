@@ -73,6 +73,25 @@ class Settings(BaseSettings):
     # MediaMTX (an operator can `mediamtx restart` to pick up paths from yml).
     mediamtx_api_url: str | None = "http://127.0.0.1:9997"
     mediamtx_api_token: str | None = None
+    # Cloud MediaMTX protects its control API with an internal user (Basic
+    # auth). Set these to the MTX_API_USER / MTX_API_PASS from the ingest host.
+    mediamtx_api_user: str | None = None
+    mediamtx_api_pass: str | None = None
+    # RTSP base of MediaMTX itself — sentry-ai's live worker pulls frames from
+    # here (NOT the raw camera), making MediaMTX the single fan-out point:
+    # camera → MediaMTX → {WebRTC to clients, RTSP to sentry-ai}. The live
+    # worker's camera_id is the camera's mediamtx_path. Set to None to disable
+    # auto-starting the AI live worker on camera register.
+    mediamtx_rtsp_url: str | None = "rtsp://127.0.0.1:8554"
+    # Cloud topology: when set, store agents PUBLISH their camera streams to
+    # this RTSP base (e.g. "rtsp://media.sentry.chipmo.mn:8554") and MediaMTX
+    # paths are created in publish mode (no pull `source`, since the cloud
+    # can't reach the store LAN). When None, MediaMTX pulls the camera RTSP
+    # directly (local laptop / on-LAN edge). Returned to paired agents via
+    # GET /api/v1/agent/stream-config.
+    agent_stream_push_url: str | None = None
+    mediamtx_publish_user: str | None = None
+    mediamtx_publish_pass: str | None = None
     # Per-person cooldown after a live-threshold breach fires — debounces
     # repeated alerts from the same suspicious moment.
     live_breach_cooldown_sec: int = 30

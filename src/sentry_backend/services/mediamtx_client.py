@@ -46,8 +46,32 @@ def _headers() -> dict[str, str]:
     return h
 
 
+def _auth() -> tuple[str, str] | httpx._client.UseClientDefault:
+    """HTTP Basic auth for the MediaMTX control API (cloud `api` user).
+
+    Returns httpx's default sentinel when no creds are set (local/dev), so the
+    `auth=` kwarg is effectively a no-op there.
+    """
+    s = get_settings()
+    if s.mediamtx_api_user and s.mediamtx_api_pass:
+        return (s.mediamtx_api_user, s.mediamtx_api_pass)
+    return httpx.USE_CLIENT_DEFAULT
+
+
+def _path_payload(rtsp_source: str) -> dict[str, Any]:
+    """Path config. In publish mode (cloud) we omit `source` so MediaMTX waits
+    for the store agent to publish to the path, instead of trying to pull the
+    camera RTSP — which is unreachable from the cloud."""
+    if get_settings().agent_stream_push_url:
+        return dict(DEFAULT_PATH_CONFIG)  # publish mode — no pull source
+    return {**DEFAULT_PATH_CONFIG, "source": rtsp_source}
+
+
 async def add_path(name: str, rtsp_source: str) -> bool:
-    """Register a new MediaMTX source for `name` pointing at `rtsp_source`.
+    """Register a MediaMTX path for `name`.
+
+    Pull mode: source = `rtsp_source` (MediaMTX pulls the camera).
+    Publish mode (agent_stream_push_url set): no source — the agent publishes.
 
     Returns True on success. Never raises — logs and returns False instead.
     Idempotency: if MediaMTX returns "already exists" (400), we PATCH instead.
@@ -57,11 +81,11 @@ async def add_path(name: str, rtsp_source: str) -> bool:
         log.debug("mediamtx.api_disabled", reason="MEDIAMTX_API_URL not set")
         return False
 
-    payload = {**DEFAULT_PATH_CONFIG, "source": rtsp_source}
+    payload = _path_payload(rtsp_source)
     url = f"{base.rstrip('/')}/v3/config/paths/add/{name}"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.post(url, json=payload, headers=_headers())
+            r = await client.post(url, json=payload, headers=_headers(), auth=_auth())
         if r.status_code in (200, 201):
             log.info("mediamtx.add_ok", path=name)
             return True
@@ -78,11 +102,11 @@ async def patch_path(name: str, rtsp_source: str) -> bool:
     base = _api_base()
     if not base:
         return False
-    payload = {**DEFAULT_PATH_CONFIG, "source": rtsp_source}
+    payload = _path_payload(rtsp_source)
     url = f"{base.rstrip('/')}/v3/config/paths/patch/{name}"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.patch(url, json=payload, headers=_headers())
+            r = await client.patch(url, json=payload, headers=_headers(), auth=_auth())
         if r.status_code in (200, 204):
             log.info("mediamtx.patch_ok", path=name)
             return True
@@ -99,7 +123,7 @@ async def delete_path(name: str) -> bool:
     url = f"{base.rstrip('/')}/v3/config/paths/delete/{name}"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.delete(url, headers=_headers())
+            r = await client.delete(url, headers=_headers(), auth=_auth())
         if r.status_code in (200, 204):
             log.info("mediamtx.delete_ok", path=name)
             return True

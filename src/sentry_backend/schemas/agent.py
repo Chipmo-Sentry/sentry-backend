@@ -50,3 +50,16 @@ class AgentCameraCreate(BaseModel):
     rtsp_url: str = Field(min_length=1)
     mediamtx_path: str | None = None
     risk_threshold: float = 70.0
+
+
+class AgentStreamConfig(BaseModel):
+    """Where the agent should publish its camera streams (cloud topology).
+
+    push_enabled=False means MediaMTX pulls cameras directly (local/on-LAN);
+    the agent does NOT push and runs no ffmpeg relays.
+    """
+
+    push_enabled: bool
+    push_rtsp_base: str | None = None     # e.g. "rtsp://media.sentry.chipmo.mn:8554"
+    publish_user: str | None = None
+    publish_pass: str | None = None

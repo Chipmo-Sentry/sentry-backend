@@ -10,7 +10,7 @@ from sentry_backend.deps.db import get_db
 from sentry_backend.deps.tenancy import get_current_organization_id
 from sentry_backend.repository import camera_repo
 from sentry_backend.schemas.camera import CameraCreate, CameraPublic, CameraUpdate
-from sentry_backend.services import mediamtx_client
+from sentry_backend.services import live_provision
 
 router = APIRouter(prefix="/api/v1/cameras", tags=["cameras"])
 
@@ -51,8 +51,8 @@ async def create_camera(
     # Commit before MediaMTX sync so the path exists in DB even if MediaMTX
     # is unreachable (operator can restart MediaMTX to pick up later).
     await db.commit()
-    if cam.mediamtx_path and body.rtsp_url and cam.enabled:
-        await mediamtx_client.add_path(cam.mediamtx_path, body.rtsp_url)
+    if cam.mediamtx_path and body.rtsp_url:
+        await live_provision.provision(cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled)
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -92,15 +92,14 @@ async def update_camera(
     )
     await db.commit()
 
-    # MediaMTX sync: rename path if changed, PATCH source if URL changed.
+    # Live pipeline sync: tear down the old path if renamed, then (re)provision
+    # MediaMTX + AI worker for the current path/enabled state.
     if old_path and old_path != cam.mediamtx_path:
-        await mediamtx_client.delete_path(old_path)
-    if cam.mediamtx_path and cam.enabled:
+        await live_provision.deprovision(old_path)
+    if cam.mediamtx_path:
         rtsp = await camera_repo.decrypt_rtsp_url(cam)
         if rtsp:
-            await mediamtx_client.add_path(cam.mediamtx_path, rtsp)
-    elif cam.mediamtx_path and not cam.enabled:
-        await mediamtx_client.delete_path(cam.mediamtx_path)
+            await live_provision.provision(cam.mediamtx_path, rtsp, enabled=cam.enabled)
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -117,4 +116,4 @@ async def delete_camera(
     await camera_repo.delete_camera(db, cam)
     await db.commit()
     if path:
-        await mediamtx_client.delete_path(path)
+        await live_provision.deprovision(path)
