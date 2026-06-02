@@ -36,14 +36,10 @@ router = APIRouter(prefix="/api/v1", tags=["agents"])
 _ADMIN_ROLES = {OrgRole.owner, OrgRole.admin}
 
 
-async def _require_store_admin(
-    db: AsyncSession, user: User, store_id: UUID
-) -> Store:
+async def _require_store_admin(db: AsyncSession, user: User, store_id: UUID) -> Store:
     """Return the store iff `user` may administer it (super-admin, or owner/
     admin of the store's org). Raises 404 / 403 otherwise."""
-    store = (
-        await db.execute(select(Store).where(Store.id == store_id))
-    ).scalar_one_or_none()
+    store = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
     if store is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
     if user.is_super_admin:
@@ -82,9 +78,7 @@ async def create_pairing_code(
         store_id=store.id,
         created_by_user_id=user.id,
     )
-    return PairingCodePublic(
-        code=code.code, store_id=store.id, expires_at=code.expires_at
-    )
+    return PairingCodePublic(code=code.code, store_id=store.id, expires_at=code.expires_at)
 
 
 @router.get("/stores/{store_id}/agents", response_model=list[AgentPublic])
@@ -127,9 +121,7 @@ async def pair_agent(
         await db.execute(select(Store).where(Store.id == pairing.store_id))
     ).scalar_one_or_none()
     if store is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Store no longer exists"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store no longer exists")
     agent = await agent_repo.create_agent(
         db,
         organization_id=pairing.organization_id,
@@ -159,9 +151,7 @@ async def agent_list_cameras(
     return [CameraPublic.from_orm_camera(c) for c in cams]
 
 
-@router.post(
-    "/agent/cameras", response_model=CameraPublic, status_code=status.HTTP_201_CREATED
-)
+@router.post("/agent/cameras", response_model=CameraPublic, status_code=status.HTTP_201_CREATED)
 async def agent_register_camera(
     body: AgentCameraCreate,
     db: Annotated[AsyncSession, Depends(get_db)],

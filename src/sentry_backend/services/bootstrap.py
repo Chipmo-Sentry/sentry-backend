@@ -30,9 +30,7 @@ async def bootstrap_superadmin() -> None:
         return
 
     async with session_scope() as db:
-        existing = (
-            await db.execute(select(User).where(User.email == email))
-        ).scalar_one_or_none()
+        existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
         if existing is not None:
             log.info("bootstrap_superadmin_exists", email=email)
             return
@@ -48,9 +46,7 @@ async def bootstrap_superadmin() -> None:
 
         org = (
             await db.execute(
-                select(Organization).where(
-                    Organization.slug == settings.bootstrap_org_slug
-                )
+                select(Organization).where(Organization.slug == settings.bootstrap_org_slug)
             )
         ).scalar_one_or_none()
         if org is None:

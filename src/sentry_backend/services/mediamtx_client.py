@@ -68,9 +68,7 @@ async def add_path(name: str, rtsp_source: str) -> bool:
         if r.status_code == 400 and "already exists" in r.text.lower():
             log.info("mediamtx.add_exists_patching", path=name)
             return await patch_path(name, rtsp_source)
-        log.warning(
-            "mediamtx.add_failed", path=name, status=r.status_code, body=r.text[:200]
-        )
+        log.warning("mediamtx.add_failed", path=name, status=r.status_code, body=r.text[:200])
     except (httpx.HTTPError, TimeoutError) as e:
         log.warning("mediamtx.add_http_err", path=name, error=str(e))
     return False
@@ -88,9 +86,7 @@ async def patch_path(name: str, rtsp_source: str) -> bool:
         if r.status_code in (200, 204):
             log.info("mediamtx.patch_ok", path=name)
             return True
-        log.warning(
-            "mediamtx.patch_failed", path=name, status=r.status_code, body=r.text[:200]
-        )
+        log.warning("mediamtx.patch_failed", path=name, status=r.status_code, body=r.text[:200])
     except (httpx.HTTPError, TimeoutError) as e:
         log.warning("mediamtx.patch_http_err", path=name, error=str(e))
     return False
@@ -110,9 +106,7 @@ async def delete_path(name: str) -> bool:
         if r.status_code == 404:
             log.info("mediamtx.delete_not_found", path=name)
             return True  # already gone, treat as success
-        log.warning(
-            "mediamtx.delete_failed", path=name, status=r.status_code, body=r.text[:200]
-        )
+        log.warning("mediamtx.delete_failed", path=name, status=r.status_code, body=r.text[:200])
     except (httpx.HTTPError, TimeoutError) as e:
         log.warning("mediamtx.delete_http_err", path=name, error=str(e))
     return False

@@ -59,8 +59,8 @@ class _PersonState:
     risk_pct: float = 0.0
     peak_risk_pct: float = 0.0
     above_threshold_since: float | None = None  # monotonic ts when we first crossed
-    last_breach_ts: float = 0.0                  # cooldown anchor
-    last_seen: float = 0.0                        # monotonic ts of last frame
+    last_breach_ts: float = 0.0  # cooldown anchor
+    last_seen: float = 0.0  # monotonic ts of last frame
 
 
 class ThresholdHandler:

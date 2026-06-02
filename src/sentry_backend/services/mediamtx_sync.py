@@ -37,14 +37,18 @@ async def rehydrate_paths() -> int:
 
     async with session_scope() as db:
         cams = (
-            await db.execute(
-                select(Camera).where(
-                    Camera.enabled.is_(True),
-                    Camera.mediamtx_path.is_not(None),
-                    Camera.rtsp_url_encrypted.is_not(None),
+            (
+                await db.execute(
+                    select(Camera).where(
+                        Camera.enabled.is_(True),
+                        Camera.mediamtx_path.is_not(None),
+                        Camera.rtsp_url_encrypted.is_not(None),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # Decrypt inside the session scope (camera objects still attached)
         to_sync: list[tuple[str, str]] = []
         for cam in cams:

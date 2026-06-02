@@ -95,7 +95,9 @@ def test_find_segments_skips_cut_outputs(tmp_path: Path) -> None:
 
 def test_find_segments_missing_dir(tmp_path: Path) -> None:
     segs = clip_cutter._find_segments_in_window(
-        tmp_path / "nonexistent", datetime.now(), datetime.now(),
+        tmp_path / "nonexistent",
+        datetime.now(),
+        datetime.now(),
     )
     assert segs == []
 

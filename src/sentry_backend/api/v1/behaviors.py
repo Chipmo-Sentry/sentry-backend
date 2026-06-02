@@ -172,7 +172,9 @@ class BehaviorConfigPatch(BaseModel):
         allowed = {"green_max", "yellow_max"}
         unknown = set(v.keys()) - allowed
         if unknown:
-            raise ValueError(f"unknown threshold(s): {sorted(unknown)} (allowed: {sorted(allowed)})")
+            raise ValueError(
+                f"unknown threshold(s): {sorted(unknown)} (allowed: {sorted(allowed)})"
+            )
         for k, val in v.items():
             if val < 0:
                 raise ValueError(f"{k} must be >= 0")

@@ -25,7 +25,7 @@ class AlertLevel(enum.StrEnum):
 
 
 class AlertTrigger(enum.StrEnum):
-    manual_upload = "manual_upload"   # human uploaded mp4 via /clips/upload
+    manual_upload = "manual_upload"  # human uploaded mp4 via /clips/upload
     live_threshold = "live_threshold"  # live risk_pct crossed camera.risk_threshold
 
 

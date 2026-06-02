@@ -105,8 +105,7 @@ async def list_org_members(
         )
     members = await org_repo.list_members(db, org_id)
     return [
-        OrgMemberPublic(user=UserPublic.model_validate(user), role=role)
-        for user, role in members
+        OrgMemberPublic(user=UserPublic.model_validate(user), role=role) for user, role in members
     ]
 
 
@@ -175,9 +174,7 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(require_super_admin)],
 ) -> UserPublic:
-    if would_self_lockout(
-        actor_id=str(actor.id), target_id=str(user_id), update=body
-    ):
+    if would_self_lockout(actor_id=str(actor.id), target_id=str(user_id), update=body):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot revoke your own super-admin access",

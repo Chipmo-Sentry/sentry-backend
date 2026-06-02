@@ -32,7 +32,10 @@ class Camera(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # (e.g. "cam1_hik") so the live worker can resolve `camera_id` (string from
     # live_metadata) back to the org/store/camera UUID hierarchy.
     mediamtx_path: Mapped[str | None] = mapped_column(
-        String(64), unique=True, index=True, nullable=True,
+        String(64),
+        unique=True,
+        index=True,
+        nullable=True,
     )
     # Risk threshold (0-100); when a tracked person crosses this in live mode,
     # we cut a clip + run VLM verify. Default 70 matches REQUIREMENTS F4.7.

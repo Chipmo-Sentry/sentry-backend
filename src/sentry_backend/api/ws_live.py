@@ -33,9 +33,7 @@ router = APIRouter(tags=["live"])
 log = get_logger("sentry_backend.ws_live")
 
 
-async def _resolve_user_from_token(
-    sm: async_sessionmaker[AsyncSession], token: str
-) -> User | None:
+async def _resolve_user_from_token(sm: async_sessionmaker[AsyncSession], token: str) -> User | None:
     """Validate access token + return the User, or None if invalid/inactive."""
     try:
         payload = decode_user_token(token)

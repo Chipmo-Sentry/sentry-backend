@@ -24,9 +24,7 @@ async def count_orgs(db: AsyncSession) -> int:
     return int(result.scalar_one())
 
 
-async def list_members(
-    db: AsyncSession, organization_id: UUID
-) -> list[tuple[User, OrgRole]]:
+async def list_members(db: AsyncSession, organization_id: UUID) -> list[tuple[User, OrgRole]]:
     """Return (user, role) pairs for every member of ``organization_id``,
     ordered by email."""
     result = await db.execute(
