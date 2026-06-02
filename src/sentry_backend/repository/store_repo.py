@@ -32,12 +32,14 @@ async def create_store(
     name: str,
     address: str | None,
     timezone: str,
+    telegram_chat_id: str | None = None,
 ) -> Store:
     store = Store(
         organization_id=organization_id,
         name=name,
         address=address,
         timezone=timezone,
+        telegram_chat_id=telegram_chat_id or None,
     )
     db.add(store)
     await db.flush()
@@ -51,6 +53,7 @@ async def update_store(
     name: str | None = None,
     address: str | None = None,
     timezone: str | None = None,
+    telegram_chat_id: str | None = None,
 ) -> Store:
     if name is not None:
         store.name = name
@@ -58,6 +61,9 @@ async def update_store(
         store.address = address
     if timezone is not None:
         store.timezone = timezone
+    if telegram_chat_id is not None:
+        # Empty string clears the override (falls back to the global chat).
+        store.telegram_chat_id = telegram_chat_id or None
     await db.flush()
     return store
 

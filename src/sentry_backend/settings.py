@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
 
+    # BE1: alert notifications. A store's own telegram_chat_id wins; this is the
+    # global fallback chat used when a store has none set. Reuses
+    # telegram_bot_token. None on both → alert notifications disabled.
+    telegram_alert_chat_id: str | None = None
+
     # LD.2: per-IP rate limit on the public POST /api/v1/leads endpoint.
     lead_rate_limit: str = "5/hour"
 

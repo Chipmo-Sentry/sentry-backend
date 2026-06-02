@@ -11,6 +11,7 @@ from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
 from sentry_backend.repository import alert_repo
 from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic
+from sentry_backend.services import alert_notify
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.live_broker import get_live_broker
@@ -69,6 +70,7 @@ async def create_alert_from_ai(
 
     payload = AlertPublic.model_validate(alert).model_dump(mode="json")
     await get_broker().publish(clip.organization_id, payload)
+    await alert_notify.notify_alert(db, alert)
 
     return AlertPublic.model_validate(alert)
 

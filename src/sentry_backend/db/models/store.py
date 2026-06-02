@@ -21,3 +21,6 @@ class Store(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Ulaanbaatar", nullable=False)
+    # BE1: per-store Telegram chat to ping on actionable alerts. None → fall
+    # back to the global TELEGRAM_ALERT_CHAT_ID (or no notification).
+    telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -29,6 +29,7 @@ from sentry_backend.db.session import session_scope
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import alert_repo
 from sentry_backend.schemas.alert import AlertPublic
+from sentry_backend.services import alert_notify
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.settings import get_settings
@@ -117,6 +118,8 @@ async def _verify_inner(clip_id: UUID, ai_base_url: str, timeout_sec: int) -> No
         )
         # session_scope auto-commits on exit
         alert_public = AlertPublic.model_validate(alert)
+        # BE1 — best-effort Telegram ping (store query + send use this session).
+        await alert_notify.notify_alert(db, alert)
 
     # 4. Push to SSE subscribers (outside DB session)
     if alert_public is not None:

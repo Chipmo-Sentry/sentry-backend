@@ -39,6 +39,7 @@ from sentry_backend.db.session import session_scope
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import alert_repo
 from sentry_backend.schemas.alert import AlertPublic
+from sentry_backend.services import alert_notify
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.clip_cutter import ClipCutError, cut_window
@@ -301,6 +302,8 @@ class ThresholdHandler:
                 peak_risk_pct=peak_risk_pct,
             )
             alert_public = AlertPublic.model_validate(alert)
+            # BE1 — best-effort Telegram ping for the live breach.
+            await alert_notify.notify_alert(db, alert)
 
         # 6. Publish to SSE
         if alert_public is not None:

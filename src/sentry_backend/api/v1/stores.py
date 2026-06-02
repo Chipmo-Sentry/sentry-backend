@@ -35,6 +35,7 @@ async def create_store(
         name=body.name,
         address=body.address,
         timezone=body.timezone,
+        telegram_chat_id=body.telegram_chat_id,
     )
     return StorePublic.model_validate(store)
 
@@ -67,6 +68,7 @@ async def update_store(
         name=body.name,
         address=body.address,
         timezone=body.timezone,
+        telegram_chat_id=body.telegram_chat_id,
     )
     return StorePublic.model_validate(store)
 
