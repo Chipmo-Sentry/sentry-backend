@@ -104,6 +104,28 @@ def decode_service_token(token: str) -> dict[str, Any]:
         raise ValueError(f"Invalid service token: {e}") from e
 
 
+AGENT_TOKEN_TTL_DAYS = 365
+
+
+def create_agent_token(agent_id: UUID) -> str:
+    """Long-lived JWT for a paired camera-relay agent. Signed with the same
+    secret as user tokens but carries ``typ=agent``; revocation is enforced by
+    checking ``Agent.is_active`` at request time (decode via decode_user_token)."""
+    settings = get_settings()
+    now = _now_utc()
+    payload: dict[str, Any] = {
+        "sub": str(agent_id),
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=AGENT_TOKEN_TTL_DAYS)).timestamp()),
+        "typ": "agent",
+    }
+    return jwt.encode(
+        payload,
+        settings.jwt_secret.get_secret_value(),
+        algorithm=settings.jwt_algorithm,
+    )
+
+
 ACCESS_COOKIE_NAME = "sentry_access"
 REFRESH_COOKIE_NAME = "sentry_refresh"
 

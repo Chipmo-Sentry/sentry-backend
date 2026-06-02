@@ -13,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from sentry_backend import __version__
 from sentry_backend.api import ws_live
 from sentry_backend.api.v1 import admin as admin_v1
+from sentry_backend.api.v1 import agents as agents_v1
 from sentry_backend.api.v1 import alerts as alerts_v1
 from sentry_backend.api.v1 import auth as auth_v1
 from sentry_backend.api.v1 import behaviors as behaviors_v1
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback_v1.router)
     app.include_router(internal_v1.router)
     app.include_router(admin_v1.router)
+    app.include_router(agents_v1.router)
     app.include_router(behaviors_v1.router)
     app.include_router(ws_live.router)
 
