@@ -1,0 +1,59 @@
+name: Deploy to Railway
+
+# Auto-deploy fallback: Railway's native GitHub trigger stopped firing, so this
+# workflow triggers the deploy of the pushed commit via the Railway GraphQL API.
+# Requires repo secret RAILWAY_TOKEN (a Railway project token for the "Sentry" project).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: railway-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Trigger Railway deploy (sentry-backend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Deploy commit to Railway and wait
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SERVICE_ID: "938ab195-99f9-4736-a1f4-6eb355c7314f"
+          ENVIRONMENT_ID: "67a3c209-fd62-4266-b400-59289d5166ef"
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "::error::RAILWAY_TOKEN secret is not set"; exit 1
+          fi
+          api() {
+            curl -sS -X POST https://backboard.railway.com/graphql/v2 \
+              -H "Content-Type: application/json" \
+              -H "Project-Access-Token: $RAILWAY_TOKEN" \
+              -d "$1"
+          }
+          jstr() { python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'; }
+
+          echo "Triggering deploy of $COMMIT_SHA -> service $SERVICE_ID"
+          MUT=$(printf 'mutation{serviceInstanceDeployV2(serviceId:"%s",environmentId:"%s",commitSha:"%s")}' "$SERVICE_ID" "$ENVIRONMENT_ID" "$COMMIT_SHA")
+          PAYLOAD=$(printf '{"query":%s}' "$(printf '%s' "$MUT" | jstr)")
+          RESP=$(api "$PAYLOAD")
+          echo "Response: $RESP"
+          DEP=$(printf '%s' "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["data"]["serviceInstanceDeployV2"])')
+          echo "Deployment id: $DEP"
+
+          for i in $(seq 1 80); do
+            Q=$(printf 'query{deployment(id:"%s"){status}}' "$DEP")
+            P=$(printf '{"query":%s}' "$(printf '%s' "$Q" | jstr)")
+            ST=$(api "$P" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["deployment"]["status"])')
+            echo "[$i] status=$ST"
+            case "$ST" in
+              SUCCESS) echo "✅ Deployed $COMMIT_SHA"; exit 0;;
+              FAILED|CRASHED|REMOVED|SKIPPED) echo "::error::Deploy ended with status $ST"; exit 1;;
+            esac
+            sleep 10
+          done
+          echo "::error::Timed out waiting for deployment"; exit 1
