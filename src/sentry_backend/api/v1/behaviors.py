@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.app_config import AppConfig
 from sentry_backend.db.models.user import User
-from sentry_backend.deps.auth import get_current_user
+from sentry_backend.deps.auth import require_super_admin
 from sentry_backend.deps.db import get_db
 
 router = APIRouter(prefix="/api/v1/behaviors", tags=["behaviors"])
@@ -233,9 +233,9 @@ async def get_behavior_config(
 async def patch_behavior_config(
     body: BehaviorConfigPatch,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _user: Annotated[User, Depends(get_current_user)],
+    _user: Annotated[User, Depends(require_super_admin)],
 ) -> BehaviorConfig:
-    """Update weights and/or thresholds. Auth required."""
+    """Update weights and/or thresholds. Super-admin only."""
     weights, thresholds = await _load_config(db)
     if body.weights:
         weights = {**weights, **body.weights}
