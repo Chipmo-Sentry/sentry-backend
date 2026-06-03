@@ -1,15 +1,22 @@
-"""Behavior tuning — GET/PATCH global 6-dim weights + risk thresholds.
+"""Behavior tuning — editable criteria catalog + global risk thresholds.
 
-Stored as a single row in `app_config` table (key='behavior'). sentry-ai
-live worker polls this endpoint and updates its in-memory scorer.
+The catalog (criteria/dimensions) lives in the `app_config` row key='behavior'
+as `{"dimensions": [...], "thresholds": {...}}`. Super-admins can add, rename,
+weight, enable/disable, and delete custom criteria from the dashboard.
 
-Thresholds are in ABSOLUTE accumulated-score units (not %): green band is
-`score < green_max`, yellow is `[green_max, yellow_max)`, red is
-`>= yellow_max`. The L5 threshold-breach handler fires when `color == red`.
+IMPORTANT — detection vs catalog: a criterion only contributes to the risk
+score if sentry-ai has a coded *detector* for its key. The seeded built-in
+criteria (`builtin=true`) have detectors; a custom criterion is inert (scores
+0) until a detector for its key ships in sentry-ai. Disabling a criterion
+(`active=false`) makes the poller send weight 0, so the scorer skips it.
+
+Thresholds are ABSOLUTE accumulated-score units: green `< green_max`, yellow
+`[green_max, yellow_max)`, red `>= yellow_max`. L5 fires when color == red.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,113 +32,68 @@ from sentry_backend.deps.db import get_db
 router = APIRouter(prefix="/api/v1/behaviors", tags=["behaviors"])
 
 BEHAVIOR_CONFIG_KEY = "behavior"
+KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 
-# === Dimension metadata (static — name/description/order; weights live in DB) ===
-
-DIMENSION_META: list[dict[str, Any]] = [
+# === Built-in criteria seed (have detectors in sentry-ai) ===
+BUILTIN_META: list[dict[str, Any]] = [
     {
         "key": "looking_around",
         "label_mn": "Орчноо харах",
-        "description_mn": (
-            "Нүүрний төв нь мөрний төвөөс хажуу талд эргэсэн. "
-            "Хүн санаачилгатай эргэн харж байгаа гэсэн дохио."
-        ),
-        "active_in_m1": True,
-        "why_deferred": None,
+        "description_mn": "Нүүрний төв нь мөрний төвөөс хажуу тийш эргэсэн — санаатай эргэн харах дохио.",
+        "weight": 1.5,
     },
     {
         "key": "item_pickup",
         "label_mn": "Бараа авах",
-        "description_mn": (
-            "Бугуй нь COCO-аар илрүүлсэн (шил, гар утас, түрийвч, laptop, "
-            "цүнх, ном гэх мэт) барааны bbox дотор орсон. Энэ нь тухайн "
-            "хүний 'holding=True' төлвийг идэвхжүүлж дараагийн 2 шалгуурыг "
-            "сэрээнэ."
-        ),
-        "active_in_m1": True,
-        "why_deferred": None,
+        "description_mn": "Бугуй нь COCO-аар илрүүлсэн барааны bbox дотор орсон — 'holding' төлвийг идэвхжүүлнэ.",
+        "weight": 15.0,
     },
     {
         "key": "body_block",
         "label_mn": "Биеэр далдлах",
-        "description_mn": (
-            "Мөрний өргөн нь rolling average-н 55%-аас бага. "
-            "Хүн камер руу нуруугаа эргүүлж гар үйлдлийг далдалж байна."
-        ),
-        "active_in_m1": True,
-        "why_deferred": None,
+        "description_mn": "Мөрний өргөн rolling average-н 55%-аас бага — камер руу нуруугаа эргүүлж далдлах.",
+        "weight": 3.0,
     },
     {
         "key": "crouch",
         "label_mn": "Бөхийх",
-        "description_mn": (
-            "Бие/мөрнөөс хонго хүртэлх босоо урт нь хүний өндрийн 15%-аас "
-            "багасч агшсан. Тавиур доор бараа авах эсвэл нуух дохио."
-        ),
-        "active_in_m1": True,
-        "why_deferred": None,
+        "description_mn": "Бие/мөрнөөс хонго хүртэлх босоо урт хүний өндрийн 15%-аар агшсан — доогуур бараа авах/нуух.",
+        "weight": 1.0,
     },
     {
         "key": "wrist_to_torso",
         "label_mn": "Хувцас доор нуух",
-        "description_mn": (
-            "Бугуй хонгоны y-аас 15% дотор удаан хугацаагаар үлдсэн (8 frame "
-            "тутамд оноо нэмэгдэнэ). Халаас/уут руу нуух дохио. Тухайн хүн "
-            "бараа барьсан үед л идэвхжинэ."
-        ),
-        "active_in_m1": True,
-        "why_deferred": None,
+        "description_mn": "Бугуй хонгоны y-аас 15% дотор удаан үлдсэн — халаас/уут руу нуух. Бараа барьсан үед л идэвхжинэ.",
+        "weight": 5.0,
     },
     {
         "key": "rapid_movement",
         "label_mn": "Хурдан хөдөлгөөн",
-        "description_mn": (
-            "Бугуйн хурд нь хүний өндрийн 8%-аас илүү (frame тутмын зай). "
-            "Бараа барьж байх үед эргэлзэх/нуух хурдан гар үйлдэл. Тухайн "
-            "хүн бараа барьсан үед л идэвхжинэ."
-        ),
-        "active_in_m1": True,
-        "why_deferred": None,
+        "description_mn": "Бугуйн хурд хүний өндрийн 8%-аас илүү — нуух/эргэлзэх хурдан гар үйлдэл. Бараа барьсан үед л.",
+        "weight": 1.5,
     },
 ]
+BUILTIN_KEYS = {d["key"] for d in BUILTIN_META}
 
-DIMENSION_KEYS = [d["key"] for d in DIMENSION_META]
-
-# === Default config — used when DB row missing on first request ===
-
-DEFAULT_WEIGHTS: dict[str, float] = {
-    "looking_around": 1.5,
-    "item_pickup": 15.0,
-    "body_block": 3.0,
-    "crouch": 1.0,
-    "wrist_to_torso": 5.0,
-    "rapid_movement": 1.5,
-}
-
-# Absolute accumulated-score thresholds.
-# score < green_max → green; < yellow_max → yellow; ≥ yellow_max → red.
-DEFAULT_THRESHOLDS: dict[str, float] = {
-    "green_max": 5.0,
-    "yellow_max": 15.0,
-}
+DEFAULT_THRESHOLDS: dict[str, float] = {"green_max": 5.0, "yellow_max": 15.0}
 
 
 # === Schemas ===
-
-
 class BehaviorDimension(BaseModel):
     key: str
     label_mn: str
     description_mn: str
     weight: float
+    active: bool
+    # builtin == has a coded detector in sentry-ai. `active_in_m1` kept for
+    # frontend back-compat; equals `builtin`.
     active_in_m1: bool
-    why_deferred: str | None
+    builtin: bool
 
 
 class BehaviorConfig(BaseModel):
     dimensions: list[BehaviorDimension]
     thresholds: dict[str, float]
-    # Color band textual labels — frontend convenience
     color_labels: dict[str, str] = {
         "green": "Хэвийн",
         "yellow": "Анхаар",
@@ -140,25 +102,16 @@ class BehaviorConfig(BaseModel):
 
 
 class BehaviorConfigPatch(BaseModel):
-    """Partial update — any subset of {weights, thresholds}."""
+    """Back-compat bulk update — weights (existing keys only) and/or thresholds."""
 
-    weights: dict[str, float] | None = Field(
-        default=None,
-        description="Map of dimension key → new weight. Unknown keys rejected.",
-    )
-    thresholds: dict[str, float] | None = Field(
-        default=None,
-        description="Subset of {green_max, yellow_max}. Both ≥ 0; green_max < yellow_max.",
-    )
+    weights: dict[str, float] | None = None
+    thresholds: dict[str, float] | None = None
 
     @field_validator("weights")
     @classmethod
-    def check_weight_keys(cls, v: dict[str, float] | None) -> dict[str, float] | None:
+    def check_weights(cls, v: dict[str, float] | None) -> dict[str, float] | None:
         if v is None:
             return None
-        unknown = set(v.keys()) - set(DIMENSION_KEYS)
-        if unknown:
-            raise ValueError(f"unknown dimension(s): {sorted(unknown)}")
         for k, val in v.items():
             if val < 0:
                 raise ValueError(f"weight for {k} must be >= 0")
@@ -169,66 +122,103 @@ class BehaviorConfigPatch(BaseModel):
     def check_thresholds(cls, v: dict[str, float] | None) -> dict[str, float] | None:
         if v is None:
             return None
-        allowed = {"green_max", "yellow_max"}
-        unknown = set(v.keys()) - allowed
+        unknown = set(v.keys()) - {"green_max", "yellow_max"}
         if unknown:
-            raise ValueError(
-                f"unknown threshold(s): {sorted(unknown)} (allowed: {sorted(allowed)})"
-            )
+            raise ValueError(f"unknown threshold(s): {sorted(unknown)}")
         for k, val in v.items():
             if val < 0:
                 raise ValueError(f"{k} must be >= 0")
         return v
 
 
-# === Helpers ===
+class DimensionCreate(BaseModel):
+    key: str = Field(min_length=2, max_length=40)
+    label_mn: str = Field(min_length=1, max_length=120)
+    description_mn: str = Field(default="", max_length=1000)
+    weight: float = Field(default=1.0, ge=0)
+
+    @field_validator("key")
+    @classmethod
+    def check_key(cls, v: str) -> str:
+        if not KEY_RE.match(v):
+            raise ValueError("key must be lowercase letters/digits/underscore, start with a letter")
+        return v
 
 
-async def _load_config(db: AsyncSession) -> tuple[dict[str, float], dict[str, float]]:
-    """Return (weights, thresholds). Lazily seeds DB row with defaults."""
+class DimensionUpdate(BaseModel):
+    label_mn: str | None = Field(default=None, min_length=1, max_length=120)
+    description_mn: str | None = Field(default=None, max_length=1000)
+    weight: float | None = Field(default=None, ge=0)
+    active: bool | None = None
+
+
+# === Catalog persistence ===
+def _seed_dimensions() -> list[dict[str, Any]]:
+    return [
+        {
+            "key": m["key"],
+            "label_mn": m["label_mn"],
+            "description_mn": m["description_mn"],
+            "weight": float(m["weight"]),
+            "active": True,
+            "builtin": True,
+        }
+        for m in BUILTIN_META
+    ]
+
+
+async def _load_catalog(
+    db: AsyncSession,
+) -> tuple[AppConfig, list[dict[str, Any]], dict[str, float]]:
+    """Return (row, dimensions, thresholds). Seeds + migrates the DB row."""
     row = (
         await db.execute(select(AppConfig).where(AppConfig.key == BEHAVIOR_CONFIG_KEY))
     ).scalar_one_or_none()
     if row is None:
         row = AppConfig(
             key=BEHAVIOR_CONFIG_KEY,
-            value={
-                "weights": dict(DEFAULT_WEIGHTS),
-                "thresholds": dict(DEFAULT_THRESHOLDS),
-            },
+            value={"dimensions": _seed_dimensions(), "thresholds": dict(DEFAULT_THRESHOLDS)},
         )
         db.add(row)
         await db.flush()
-    weights = {**DEFAULT_WEIGHTS, **row.value.get("weights", {})}
-    thresholds = {**DEFAULT_THRESHOLDS, **row.value.get("thresholds", {})}
-    return weights, thresholds
+    value = dict(row.value)
+    thresholds = {**DEFAULT_THRESHOLDS, **value.get("thresholds", {})}
+    dims = value.get("dimensions")
+    if not dims:
+        # Migrate the legacy {weights, thresholds} shape into a catalog.
+        old_weights = value.get("weights", {})
+        dims = _seed_dimensions()
+        for d in dims:
+            if d["key"] in old_weights:
+                d["weight"] = float(old_weights[d["key"]])
+        row.value = {"dimensions": dims, "thresholds": thresholds}
+        await db.flush()
+    return row, dims, thresholds
 
 
-def _to_response(weights: dict[str, float], thresholds: dict[str, float]) -> BehaviorConfig:
-    dims = [
-        BehaviorDimension(
-            key=meta["key"],
-            label_mn=meta["label_mn"],
-            description_mn=meta["description_mn"],
-            weight=float(weights.get(meta["key"], DEFAULT_WEIGHTS[meta["key"]])),
-            active_in_m1=meta["active_in_m1"],
-            why_deferred=meta["why_deferred"],
-        )
-        for meta in DIMENSION_META
-    ]
-    return BehaviorConfig(dimensions=dims, thresholds=thresholds)
+def _to_response(dims: list[dict[str, Any]], thresholds: dict[str, float]) -> BehaviorConfig:
+    return BehaviorConfig(
+        dimensions=[
+            BehaviorDimension(
+                key=d["key"],
+                label_mn=d["label_mn"],
+                description_mn=d.get("description_mn", ""),
+                weight=float(d["weight"]),
+                active=bool(d.get("active", True)),
+                active_in_m1=bool(d.get("builtin", False)),
+                builtin=bool(d.get("builtin", False)),
+            )
+            for d in dims
+        ],
+        thresholds=thresholds,
+    )
 
 
 # === Endpoints ===
-
-
 @router.get("", response_model=BehaviorConfig)
-async def get_behavior_config(
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> BehaviorConfig:
-    """Current global behavior config. Public (any authenticated context can poll)."""
-    weights, thresholds = await _load_config(db)
-    return _to_response(weights, thresholds)
+async def get_behavior_config(db: Annotated[AsyncSession, Depends(get_db)]) -> BehaviorConfig:
+    _row, dims, thresholds = await _load_catalog(db)
+    return _to_response(dims, thresholds)
 
 
 @router.patch("", response_model=BehaviorConfig)
@@ -237,10 +227,12 @@ async def patch_behavior_config(
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: Annotated[User, Depends(require_super_admin)],
 ) -> BehaviorConfig:
-    """Update weights and/or thresholds. Super-admin only."""
-    weights, thresholds = await _load_config(db)
+    """Bulk weights (existing keys) + thresholds. Super-admin only."""
+    row, dims, thresholds = await _load_catalog(db)
     if body.weights:
-        weights = {**weights, **body.weights}
+        for d in dims:
+            if d["key"] in body.weights:
+                d["weight"] = float(body.weights[d["key"]])
     if body.thresholds:
         new_t = {**thresholds, **body.thresholds}
         if new_t["green_max"] >= new_t["yellow_max"]:
@@ -249,10 +241,74 @@ async def patch_behavior_config(
                 detail="green_max must be < yellow_max",
             )
         thresholds = new_t
+    row.value = {"dimensions": dims, "thresholds": thresholds}
+    return _to_response(dims, thresholds)
 
-    row = (
-        await db.execute(select(AppConfig).where(AppConfig.key == BEHAVIOR_CONFIG_KEY))
-    ).scalar_one()
-    row.value = {"weights": weights, "thresholds": thresholds}
 
-    return _to_response(weights, thresholds)
+@router.post("/dimensions", response_model=BehaviorConfig, status_code=status.HTTP_201_CREATED)
+async def add_dimension(
+    body: DimensionCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: Annotated[User, Depends(require_super_admin)],
+) -> BehaviorConfig:
+    row, dims, thresholds = await _load_catalog(db)
+    if any(d["key"] == body.key for d in dims):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Criterion '{body.key}' already exists",
+        )
+    dims.append(
+        {
+            "key": body.key,
+            "label_mn": body.label_mn,
+            "description_mn": body.description_mn,
+            "weight": float(body.weight),
+            "active": True,
+            "builtin": False,
+        }
+    )
+    row.value = {"dimensions": dims, "thresholds": thresholds}
+    return _to_response(dims, thresholds)
+
+
+@router.patch("/dimensions/{key}", response_model=BehaviorConfig)
+async def update_dimension(
+    key: str,
+    body: DimensionUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: Annotated[User, Depends(require_super_admin)],
+) -> BehaviorConfig:
+    row, dims, thresholds = await _load_catalog(db)
+    target = next((d for d in dims if d["key"] == key), None)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Criterion not found")
+    if body.label_mn is not None:
+        target["label_mn"] = body.label_mn
+    if body.description_mn is not None:
+        target["description_mn"] = body.description_mn
+    if body.weight is not None:
+        target["weight"] = float(body.weight)
+    if body.active is not None:
+        target["active"] = body.active
+    row.value = {"dimensions": dims, "thresholds": thresholds}
+    return _to_response(dims, thresholds)
+
+
+@router.delete("/dimensions/{key}", response_model=BehaviorConfig)
+async def delete_dimension(
+    key: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: Annotated[User, Depends(require_super_admin)],
+) -> BehaviorConfig:
+    row, dims, thresholds = await _load_catalog(db)
+    target = next((d for d in dims if d["key"] == key), None)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Criterion not found")
+    if target.get("builtin"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Built-in criteria can't be deleted (disable it instead)",
+        )
+    dims = [d for d in dims if d["key"] != key]
+    row.value = {"dimensions": dims, "thresholds": thresholds}
+    return _to_response(dims, thresholds)
