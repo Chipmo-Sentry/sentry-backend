@@ -1,10 +1,10 @@
 """Internal endpoints — service-to-service (e.g. sentry-ai → backend)."""
 
 import hmac
-from typing import Annotated, Any
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
@@ -78,10 +78,40 @@ async def create_alert_from_ai(
 # ===== M1-LIVE L3: live metadata fanout =====
 
 
+class LiveTrack(BaseModel):
+    """One detected person in one frame (REV.1 — mirrors sentry-ai's
+    TrackPayload). Lenient: unknown keys ignored, display fields defaulted so a
+    schema addition on the AI side never 422s the whole batch."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    person_id: int
+    box: tuple[float, float, float, float]
+    det_confidence: float = 0.0
+    # Accumulated risk score (absolute, not percent — see /api/v1/behaviors).
+    risk_pct: float = Field(default=0.0, ge=0.0)
+    color: Literal["green", "yellow", "red"] = "green"
+
+
+class LiveFrame(BaseModel):
+    """Per-analyzed-frame metadata from the sentry-ai live worker
+    (REV.1 — mirrors sentry-ai's FrameMetadata)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    camera_id: str = Field(min_length=1, max_length=128)
+    frame_id: int = 0
+    ts_ms: int = 0
+    width: int = 0
+    height: int = 0
+    fps_inference: float = 0.0
+    tracks: list[LiveTrack] = Field(default_factory=list)
+
+
 class LiveMetadataBatch(BaseModel):
     """Batch of per-frame metadata from sentry-ai live worker."""
 
-    frames: list[dict[str, Any]] = Field(min_length=1, max_length=200)
+    frames: list[LiveFrame] = Field(min_length=1, max_length=200)
 
 
 async def _require_simple_internal_token(
@@ -119,10 +149,11 @@ async def receive_live_metadata(
     threshold_handler = get_threshold_handler()
     published = 0
     for frame in body.frames:
-        cam_id = frame.get("camera_id")
-        if not isinstance(cam_id, str) or not cam_id:
-            continue
-        await broker.publish(cam_id, frame)
-        await threshold_handler.on_frame(frame)
+        # Downstream (WS fanout + threshold handler) consume the raw dict shape,
+        # so dump back to JSON-mode dict — the wire payload to browsers is
+        # unchanged, but the batch is now validated/typed on the way in.
+        frame_dict = frame.model_dump(mode="json")
+        await broker.publish(frame.camera_id, frame_dict)
+        await threshold_handler.on_frame(frame_dict)
         published += 1
     return {"received": len(body.frames), "published": published}
