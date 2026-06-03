@@ -58,9 +58,7 @@ async def _resolve_chat_id(db: AsyncSession, alert: Alert) -> str | None:
     settings = get_settings()
     if alert.store_id is not None:
         chat = (
-            await db.execute(
-                select(Store.telegram_chat_id).where(Store.id == alert.store_id)
-            )
+            await db.execute(select(Store.telegram_chat_id).where(Store.id == alert.store_id))
         ).scalar_one_or_none()
         if chat:
             return chat

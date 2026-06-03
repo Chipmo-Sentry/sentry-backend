@@ -11,6 +11,7 @@ from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
 from sentry_backend.repository import alert_repo
 from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic
+from sentry_backend.security import decode_user_token
 from sentry_backend.services import alert_notify
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
@@ -119,17 +120,25 @@ async def _require_simple_internal_token(
 ) -> None:
     """Simpler shared-secret auth for high-volume live metadata.
 
-    sentry-ai sends `Authorization: Bearer <SERVICE_TOKEN_SECRET prefix>`. We
-    accept either:
+    sentry-ai sends `Authorization: Bearer <token>`. We accept any of:
       - A bearer token matching `live_metadata_shared_secret` (env), OR
+      - A paired node's ai_node JWT (typ=ai_node) — signature + exp only, no
+        per-batch DB hit on this high-volume path (revocation is enforced on the
+        management endpoints), OR
       - A valid full service JWT (delegates to require_service_token).
     """
     settings = get_settings()
-    expected = settings.live_metadata_shared_secret
-    if expected and authorization and authorization.lower().startswith("bearer "):
+    if authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(maxsplit=1)[1]
-        if hmac.compare_digest(token, expected):
+        expected = settings.live_metadata_shared_secret
+        if expected and hmac.compare_digest(token, expected):
             return
+        # Paired AI node token (signature-validated; cheap, no DB).
+        try:
+            if decode_user_token(token).get("typ") == "ai_node":
+                return
+        except ValueError:
+            pass
     # Fall back to JWT path
     await require_service_token(authorization)
 

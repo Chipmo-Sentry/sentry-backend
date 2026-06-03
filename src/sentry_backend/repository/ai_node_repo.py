@@ -55,9 +55,7 @@ async def consume_pairing_code(db: AsyncSession, code: str) -> AiNodePairingCode
     return await _active_code(db, code)
 
 
-async def mark_consumed(
-    db: AsyncSession, pairing: AiNodePairingCode, ai_node_id: UUID
-) -> None:
+async def mark_consumed(db: AsyncSession, pairing: AiNodePairingCode, ai_node_id: UUID) -> None:
     pairing.consumed_at = _now()
     pairing.ai_node_id = ai_node_id
     await db.flush()
@@ -87,9 +85,7 @@ async def create_node(
 
 
 async def get_node(db: AsyncSession, node_id: UUID) -> AiNode | None:
-    return (
-        await db.execute(select(AiNode).where(AiNode.id == node_id))
-    ).scalar_one_or_none()
+    return (await db.execute(select(AiNode).where(AiNode.id == node_id))).scalar_one_or_none()
 
 
 async def list_nodes(db: AsyncSession) -> list[AiNode]:

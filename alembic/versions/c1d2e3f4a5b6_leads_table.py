@@ -21,9 +21,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    lead_status = sa.Enum(
-        "new", "contacted", "qualified", "closed", name="lead_status"
-    )
+    lead_status = sa.Enum("new", "contacted", "qualified", "closed", name="lead_status")
     op.create_table(
         "leads",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
