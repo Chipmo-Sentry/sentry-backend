@@ -14,12 +14,17 @@ from sentry_backend.db.models.store import Store
 from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import require_super_admin
 from sentry_backend.deps.db import get_db
-from sentry_backend.repository import lead_repo, org_repo, user_repo
+from sentry_backend.repository import ai_node_repo, lead_repo, org_repo, user_repo
 from sentry_backend.schemas.admin import (
     AdminStats,
     OrgMemberPublic,
     UserAdminUpdate,
     would_self_lockout,
+)
+from sentry_backend.schemas.ai_node import (
+    AiNodePublic,
+    AiNodeUpdate,
+    PairingCodePublic,
 )
 from sentry_backend.schemas.auth import UserPublic
 from sentry_backend.schemas.lead import LeadPublic, LeadUpdate
@@ -220,3 +225,59 @@ async def update_lead(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
     lead = await lead_repo.update_lead(db, lead, status=body.status, notes=body.notes)
     return LeadPublic.model_validate(lead)
+
+
+# ── AI nodes (compute boxes running sentry-ai) ──────────────────────────
+@router.post(
+    "/ai-nodes/pairing-codes",
+    response_model=PairingCodePublic,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ai_node_pairing_code(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_super_admin)],
+) -> PairingCodePublic:
+    code = await ai_node_repo.create_pairing_code(db, created_by_user_id=user.id)
+    return PairingCodePublic(code=code.code, expires_at=code.expires_at)
+
+
+@router.get("/ai-nodes", response_model=list[AiNodePublic])
+async def list_ai_nodes(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> list[AiNodePublic]:
+    nodes = await ai_node_repo.list_nodes(db)
+    return [AiNodePublic.model_validate(n) for n in nodes]
+
+
+@router.post("/ai-nodes/{node_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_ai_node(
+    node_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> None:
+    node = await ai_node_repo.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI node not found")
+    await ai_node_repo.deactivate_node(db, node)
+
+
+@router.patch("/ai-nodes/{node_id}", response_model=AiNodePublic)
+async def update_ai_node(
+    node_id: UUID,
+    body: AiNodeUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> AiNodePublic:
+    node = await ai_node_repo.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI node not found")
+    node = await ai_node_repo.update_node(
+        db,
+        node,
+        name=body.name,
+        enabled=body.enabled,
+        provider=body.provider,
+        frame_skip=body.frame_skip,
+    )
+    return AiNodePublic.model_validate(node)

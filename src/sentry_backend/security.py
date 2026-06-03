@@ -126,6 +126,27 @@ def create_agent_token(agent_id: UUID) -> str:
     )
 
 
+AI_NODE_TOKEN_TTL_DAYS = 365
+
+
+def create_ai_node_token(ai_node_id: UUID) -> str:
+    """Long-lived JWT for a paired AI compute node (Predator/Hetzner). Carries
+    ``typ=ai_node``; revocation enforced via ``AiNode.is_active`` at request time."""
+    settings = get_settings()
+    now = _now_utc()
+    payload: dict[str, Any] = {
+        "sub": str(ai_node_id),
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=AI_NODE_TOKEN_TTL_DAYS)).timestamp()),
+        "typ": "ai_node",
+    }
+    return jwt.encode(
+        payload,
+        settings.jwt_secret.get_secret_value(),
+        algorithm=settings.jwt_algorithm,
+    )
+
+
 ACCESS_COOKIE_NAME = "sentry_access"
 REFRESH_COOKIE_NAME = "sentry_refresh"
 
