@@ -38,6 +38,10 @@ class AiNodeHeartbeat(BaseModel):
     vram_mb: int | None = None
     active_cameras: int | None = None
     version: str | None = Field(default=None, max_length=64)
+    # Per-dependency health the node probes locally (e.g. {"ollama": true,
+    # "ingest": false, "ai": true}). Opaque map so the node can add keys
+    # without a schema change; surfaced read-only in superadmin.
+    health: dict[str, bool] | None = None
 
 
 class AiNodePairingCodePublic(BaseModel):
