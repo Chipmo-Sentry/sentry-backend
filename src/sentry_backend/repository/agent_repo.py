@@ -112,3 +112,10 @@ async def touch_last_seen(db: AsyncSession, agent: Agent) -> None:
 async def deactivate_agent(db: AsyncSession, agent: Agent) -> None:
     agent.is_active = False
     await db.flush()
+
+
+async def delete_agent(db: AsyncSession, agent: Agent) -> None:
+    """Hard-delete a paired computer. Pairing codes referencing it have their
+    used_by_agent_id set to NULL via the FK's ON DELETE SET NULL."""
+    await db.delete(agent)
+    await db.flush()

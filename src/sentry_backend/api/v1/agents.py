@@ -104,7 +104,7 @@ async def revoke_agent(
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
     await _require_store_admin(db, user, agent.store_id)
-    await agent_repo.deactivate_agent(db, agent)
+    await agent_repo.delete_agent(db, agent)
 
 
 # ── Agent: pairing ──────────────────────────────────────────────────────
