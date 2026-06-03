@@ -22,9 +22,9 @@ from sentry_backend.schemas.admin import (
     would_self_lockout,
 )
 from sentry_backend.schemas.ai_node import (
+    AiNodePairingCodePublic,
     AiNodePublic,
     AiNodeUpdate,
-    PairingCodePublic,
 )
 from sentry_backend.schemas.auth import UserPublic
 from sentry_backend.schemas.lead import LeadPublic, LeadUpdate
@@ -230,15 +230,15 @@ async def update_lead(
 # ── AI nodes (compute boxes running sentry-ai) ──────────────────────────
 @router.post(
     "/ai-nodes/pairing-codes",
-    response_model=PairingCodePublic,
+    response_model=AiNodePairingCodePublic,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_ai_node_pairing_code(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_super_admin)],
-) -> PairingCodePublic:
+) -> AiNodePairingCodePublic:
     code = await ai_node_repo.create_pairing_code(db, created_by_user_id=user.id)
-    return PairingCodePublic(code=code.code, expires_at=code.expires_at)
+    return AiNodePairingCodePublic(code=code.code, expires_at=code.expires_at)
 
 
 @router.get("/ai-nodes", response_model=list[AiNodePublic])

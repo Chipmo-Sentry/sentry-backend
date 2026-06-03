@@ -40,7 +40,7 @@ class AiNodeHeartbeat(BaseModel):
     version: str | None = Field(default=None, max_length=64)
 
 
-class PairingCodePublic(BaseModel):
+class AiNodePairingCodePublic(BaseModel):
     code: str
     expires_at: datetime
 
