@@ -1,9 +1,10 @@
 """Super-admin only — manage orgs, users, memberships, dashboard stats."""
 
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -248,6 +249,36 @@ async def list_ai_nodes(
 ) -> list[AiNodePublic]:
     nodes = await ai_node_repo.list_nodes(db)
     return [AiNodePublic.model_validate(n) for n in nodes]
+
+
+_METRIC_SPANS = {
+    "1h": timedelta(hours=1),
+    "6h": timedelta(hours=6),
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
+@router.get("/ai-nodes/{node_id}/metrics")
+async def ai_node_metrics(
+    node_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+    range_: Annotated[str, Query(alias="range")] = "24h",
+    bucket: str = "auto",
+) -> list[dict[str, object]]:
+    """Resource time-series (CPU/RAM/GPU) for the observability dashboard.
+
+    `range` = 1h | 6h | 24h | 7d | 30d. `bucket` = auto | raw | hour (auto picks
+    raw for ≤24h, hourly averages for wider ranges to keep the payload small).
+    """
+    span = _METRIC_SPANS.get(range_, _METRIC_SPANS["24h"])
+    to = datetime.now(UTC)
+    frm = to - span
+    if bucket == "auto":
+        bucket = "hour" if span > timedelta(hours=24) else "raw"
+    return await ai_node_repo.get_metrics(db, node_id, frm=frm, to=to, bucket=bucket)
 
 
 @router.post("/ai-nodes/{node_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)

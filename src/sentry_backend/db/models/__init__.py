@@ -1,7 +1,7 @@
 """Import all ORM models so SQLAlchemy + Alembic see them."""
 
 from sentry_backend.db.models.agent import Agent, AgentPairingCode
-from sentry_backend.db.models.ai_node import AiNode, AiNodePairingCode
+from sentry_backend.db.models.ai_node import AiNode, AiNodeMetric, AiNodePairingCode
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
 from sentry_backend.db.models.app_config import AppConfig
 from sentry_backend.db.models.camera import Camera
@@ -20,6 +20,7 @@ __all__ = [
     "Agent",
     "AgentPairingCode",
     "AiNode",
+    "AiNodeMetric",
     "AiNodePairingCode",
     "Alert",
     "AlertCategory",

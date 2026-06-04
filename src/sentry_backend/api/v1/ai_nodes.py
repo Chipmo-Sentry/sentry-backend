@@ -70,6 +70,8 @@ async def ai_node_heartbeat(
     if body.version and body.version != node.version:
         node.version = body.version
     await ai_node_repo.touch_heartbeat(db, node, telemetry)
+    # Append to the resource time-series for the observability dashboard (docs/19).
+    await ai_node_repo.insert_metric(db, node.id, body.model_dump())
     await db.commit()
     return _config(node)
 
