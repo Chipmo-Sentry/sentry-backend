@@ -13,6 +13,7 @@ from sentry_backend.db.models.organization import (
     OrganizationMember,
     OrgRole,
 )
+from sentry_backend.db.models.rag_case import VerifiedCase
 from sentry_backend.db.models.store import Store
 from sentry_backend.db.models.user import User
 
@@ -37,4 +38,5 @@ __all__ = [
     "OrgRole",
     "Store",
     "User",
+    "VerifiedCase",
 ]

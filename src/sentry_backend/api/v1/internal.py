@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
-from sentry_backend.repository import alert_repo
+from sentry_backend.repository import alert_repo, rag_case_repo
 from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic
+from sentry_backend.schemas.rag import RagCaseCreate, RagCaseMatch, RagSimilarRequest
 from sentry_backend.security import decode_user_token
 from sentry_backend.services import alert_notify
 from sentry_backend.services.alert_broker import get_broker
@@ -166,3 +167,47 @@ async def receive_live_metadata(
         await threshold_handler.on_frame(frame_dict)
         published += 1
     return {"received": len(body.frames), "published": published}
+
+
+# ── RAG verified-case store (docs/19 Phase 4) ───────────────────────────────
+@router.post("/rag/cases", status_code=status.HTTP_201_CREATED)
+async def rag_add_case(
+    body: RagCaseCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(_require_simple_internal_token)],
+) -> dict[str, str]:
+    """Store a staff-verified event (embedded by the AI node) for future RAG
+    retrieval. Called when feedback confirms/denies a suspicion."""
+    case = await rag_case_repo.add_case(
+        db,
+        store_id=body.store_id,
+        verdict=body.verdict,
+        category=body.category,
+        description=body.description,
+        embedding=body.embedding,
+    )
+    await db.commit()
+    return {"id": str(case.id)}
+
+
+@router.post("/rag/similar", response_model=list[RagCaseMatch])
+async def rag_similar(
+    body: RagSimilarRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(_require_simple_internal_token)],
+) -> list[RagCaseMatch]:
+    """Top-k past verified cases most similar to the query embedding — the AI
+    node injects these into the VLM verify prompt as few-shot examples."""
+    matches = await rag_case_repo.similar_cases(
+        db, store_id=body.store_id, embedding=body.embedding, k=body.k
+    )
+    return [
+        RagCaseMatch(
+            description=c.description,
+            category=c.category,
+            verdict=c.verdict,
+            score=round(score, 4),
+        )
+        for c, score in matches
+        if score > 0
+    ]
