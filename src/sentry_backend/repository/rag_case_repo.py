@@ -58,9 +58,7 @@ async def similar_cases(
     to `embedding`, most similar first. Returns (case, score) pairs."""
     stmt = (
         select(VerifiedCase)
-        .where(
-            (VerifiedCase.store_id == store_id) | (VerifiedCase.store_id.is_(None))
-        )
+        .where((VerifiedCase.store_id == store_id) | (VerifiedCase.store_id.is_(None)))
         .order_by(VerifiedCase.created_at.desc())
         .limit(_CANDIDATE_LIMIT)
     )

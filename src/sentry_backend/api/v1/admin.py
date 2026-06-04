@@ -143,16 +143,18 @@ async def feedback_analytics(
         c["fp_rate"] = round(fp_rate, 2)
         # Enough signal + mostly false → suggest making this category stricter.
         if total >= 5 and fp_rate >= 0.5:
-            suggestions.append({
-                "category": cat,
-                "fp_rate": round(fp_rate, 2),
-                "samples": total,
-                "action": "raise_threshold",
-                "hint": (
-                    f"'{cat}' сэжгийн {round(fp_rate * 100)}% нь худал сэрэлт "
-                    f"({c['false_positive']}/{total}). Босго өсгөх / жин бууруулахыг бодолцоно уу."
-                ),
-            })
+            suggestions.append(
+                {
+                    "category": cat,
+                    "fp_rate": round(fp_rate, 2),
+                    "samples": total,
+                    "action": "raise_threshold",
+                    "hint": (
+                        f"'{cat}' сэжгийн {round(fp_rate * 100)}% нь худал сэрэлт "
+                        f"({c['false_positive']}/{total}). Босго өсгөх / жин бууруулахыг бодолцоно уу."
+                    ),
+                }
+            )
     return {
         "total": sum(totals.values()),
         "totals": totals,

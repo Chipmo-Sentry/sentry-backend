@@ -28,8 +28,18 @@ def upgrade() -> None:
         sa.Column("category", sa.String(length=32), nullable=True),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("embedding", postgresql.ARRAY(sa.Float()), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["store_id"], ["stores.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )

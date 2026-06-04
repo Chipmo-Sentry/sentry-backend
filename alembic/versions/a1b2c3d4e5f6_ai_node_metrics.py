@@ -37,9 +37,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["ai_node_id"], ["ai_nodes.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_ai_node_metrics_node_ts", "ai_node_metrics", ["ai_node_id", "ts"]
-    )
+    op.create_index("ix_ai_node_metrics_node_ts", "ai_node_metrics", ["ai_node_id", "ts"])
 
 
 def downgrade() -> None:

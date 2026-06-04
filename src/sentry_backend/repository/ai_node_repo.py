@@ -10,8 +10,15 @@ from sentry_backend.db.models.ai_node import AiNode, AiNodeMetric, AiNodePairing
 
 # Numeric columns averaged when the metrics time-series is bucketed by hour.
 _METRIC_COLS = (
-    "cpu_pct", "ram_used_mb", "ram_total_mb", "gpu_pct",
-    "vram_used_mb", "vram_total_mb", "gpu_temp_c", "fps_inference", "active_cameras",
+    "cpu_pct",
+    "ram_used_mb",
+    "ram_total_mb",
+    "gpu_pct",
+    "vram_used_mb",
+    "vram_total_mb",
+    "gpu_temp_c",
+    "fps_inference",
+    "active_cameras",
 )
 
 _CODE_DIGITS = 6
@@ -139,9 +146,7 @@ async def get_metrics(
     metric per hour (for wide ranges like 7d); 'raw' returns every sample."""
     if bucket == "hour":
         ts_col = func.date_trunc("hour", AiNodeMetric.ts).label("ts")
-        cols = [ts_col] + [
-            func.avg(getattr(AiNodeMetric, c)).label(c) for c in _METRIC_COLS
-        ]
+        cols = [ts_col] + [func.avg(getattr(AiNodeMetric, c)).label(c) for c in _METRIC_COLS]
         stmt = (
             select(*cols)
             .where(
@@ -156,8 +161,10 @@ async def get_metrics(
         return [
             {
                 "ts": r.ts.isoformat(),
-                **{c: (round(float(v), 1) if (v := getattr(r, c)) is not None else None)
-                   for c in _METRIC_COLS},
+                **{
+                    c: (round(float(v), 1) if (v := getattr(r, c)) is not None else None)
+                    for c in _METRIC_COLS
+                },
             }
             for r in rows
         ]
@@ -172,10 +179,7 @@ async def get_metrics(
         .order_by(AiNodeMetric.ts)
     )
     samples = (await db.execute(stmt)).scalars().all()
-    return [
-        {"ts": s.ts.isoformat(), **{c: getattr(s, c) for c in _METRIC_COLS}}
-        for s in samples
-    ]
+    return [{"ts": s.ts.isoformat(), **{c: getattr(s, c) for c in _METRIC_COLS}} for s in samples]
 
 
 async def deactivate_node(db: AsyncSession, node: AiNode) -> None:
