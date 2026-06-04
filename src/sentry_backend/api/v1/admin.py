@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentry_backend.db.models.ai_node import AiNode
 from sentry_backend.db.models.alert import Alert
 from sentry_backend.db.models.camera import Camera
+from sentry_backend.db.models.feedback import Feedback
 from sentry_backend.db.models.store import Store
 from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import require_super_admin
@@ -103,6 +104,60 @@ async def alert_analytics(
         "by_category": by_category,
         "by_level": by_level,
         "by_day": by_day,
+    }
+
+
+@router.get("/analytics/feedback")
+async def feedback_analytics(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+    range_: Annotated[str, Query(alias="range")] = "30d",
+) -> dict[str, object]:
+    """Close the feedback loop (docs/19 Phase 3). Joins staff verdicts (Feedback)
+    to the alert's VLM category and reports, per category, how many were marked
+    true_positive / false_positive / unclear + the false-alarm rate — plus
+    read-only TUNING SUGGESTIONS for noisy categories (high FP rate). Applying a
+    suggestion (weight/threshold change) stays a human action for now."""
+    span = _METRIC_SPANS.get(range_, _METRIC_SPANS["30d"])
+    frm = datetime.now(UTC) - span
+    rows = await db.execute(
+        select(Alert.category, Feedback.verdict, func.count())
+        .join(Alert, Feedback.alert_id == Alert.id)
+        .where(Feedback.created_at >= frm)
+        .group_by(Alert.category, Feedback.verdict)
+    )
+    by_category: dict[str, dict[str, Any]] = {}
+    totals = {"true_positive": 0, "false_positive": 0, "unclear": 0}
+    for cat, verdict, n in rows.all():
+        c = by_category.setdefault(
+            str(cat), {"true_positive": 0, "false_positive": 0, "unclear": 0}
+        )
+        c[str(verdict)] = int(n)
+        totals[str(verdict)] = totals.get(str(verdict), 0) + int(n)
+
+    suggestions: list[dict[str, object]] = []
+    for cat, c in by_category.items():
+        total = c["true_positive"] + c["false_positive"] + c["unclear"]
+        fp_rate = c["false_positive"] / total if total else 0.0
+        c["total"] = total
+        c["fp_rate"] = round(fp_rate, 2)
+        # Enough signal + mostly false → suggest making this category stricter.
+        if total >= 5 and fp_rate >= 0.5:
+            suggestions.append({
+                "category": cat,
+                "fp_rate": round(fp_rate, 2),
+                "samples": total,
+                "action": "raise_threshold",
+                "hint": (
+                    f"'{cat}' сэжгийн {round(fp_rate * 100)}% нь худал сэрэлт "
+                    f"({c['false_positive']}/{total}). Босго өсгөх / жин бууруулахыг бодолцоно уу."
+                ),
+            })
+    return {
+        "total": sum(totals.values()),
+        "totals": totals,
+        "by_category": by_category,
+        "suggestions": suggestions,
     }
 
 
