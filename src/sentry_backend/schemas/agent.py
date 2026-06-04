@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from sentry_backend.schemas.camera import MEDIAMTX_PATH_PATTERN
+
 
 class PairingCodePublic(BaseModel):
     """Returned to the admin UI after generating a code."""
@@ -48,7 +50,9 @@ class AgentCameraCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=255)
     rtsp_url: str = Field(min_length=1)
-    mediamtx_path: str | None = None
+    # Agent-supplied, so validate it the same way as the user-facing schema —
+    # it reaches the recordings filesystem path and the MediaMTX control API.
+    mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
     risk_threshold: float = 70.0
 
 

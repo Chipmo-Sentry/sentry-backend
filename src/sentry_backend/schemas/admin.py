@@ -14,6 +14,11 @@ class AdminStats(BaseModel):
     stores: int
     cameras: int
     alerts: int
+    # Usage detail (docs/19 Phase 2)
+    cameras_enabled: int = 0
+    ai_nodes: int = 0
+    ai_nodes_online: int = 0
+    alerts_24h: int = 0
 
 
 class OrgMemberPublic(BaseModel):

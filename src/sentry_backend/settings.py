@@ -55,6 +55,10 @@ class Settings(BaseSettings):
 
     sentry_ai_url: str | None = None  # e.g. http://localhost:8001 — None disables verify
     sentry_ai_timeout_sec: int = 60
+    # Shared secret sent as `Authorization: Bearer` to sentry-ai's /v1/* routes.
+    # None/empty → no header (sentry-ai must then be unauthenticated/LAN-only).
+    # Set the SAME value here and as sentry-ai's AI_SERVICE_TOKEN in prod.
+    sentry_ai_service_token: str | None = None
 
     # M1-LIVE L3: simple shared-secret accepted by /api/v1/internal/live-metadata
     # (faster path than full JWT for high-volume per-frame metadata).

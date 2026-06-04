@@ -81,8 +81,10 @@ async def _verify_inner(clip_id: UUID, ai_base_url: str, timeout_sec: int) -> No
         "camera_id": clip_payload["camera_id"],
     }
     log.info("calling sentry-ai", clip_id=str(clip_id), url=f"{ai_base_url}/v1/verify")
+    token = get_settings().sentry_ai_service_token
+    headers = {"Authorization": f"Bearer {token}"} if token else None
     async with httpx.AsyncClient(timeout=timeout_sec) as client:
-        resp = await client.post(f"{ai_base_url}/v1/verify", json=body)
+        resp = await client.post(f"{ai_base_url}/v1/verify", json=body, headers=headers)
 
     if resp.status_code != 200:
         log.error(

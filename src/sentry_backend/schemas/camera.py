@@ -8,6 +8,12 @@ from pydantic import BaseModel, Field
 
 from sentry_backend.db.models.camera import Camera
 
+# mediamtx_path flows into filesystem paths (clip_cutter recordings root) and
+# the MediaMTX control-API URL, so it MUST be a safe slug — lowercase
+# alphanumerics, underscore and hyphen only, no '/', '..', whitespace, etc.
+# Shared by CameraCreate/CameraUpdate and the agent-facing AgentCameraCreate.
+MEDIAMTX_PATH_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
+
 
 class CameraCreate(BaseModel):
     store_id: UUID
@@ -19,7 +25,7 @@ class CameraCreate(BaseModel):
     # L5 live-pipeline registration (used by sentry-agent-pc).
     # mediamtx_path is unique per Camera and drives the live-worker camera_id;
     # if None, backend auto-generates a slug from `name`.
-    mediamtx_path: str | None = Field(default=None, min_length=1, max_length=64)
+    mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
     risk_threshold: float = Field(default=70.0, ge=0.0)
 
 
@@ -29,7 +35,7 @@ class CameraUpdate(BaseModel):
     shelf_zone_json: dict[str, Any] | None = None
     stage2_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     enabled: bool | None = None
-    mediamtx_path: str | None = Field(default=None, min_length=1, max_length=64)
+    mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
     risk_threshold: float | None = Field(default=None, ge=0.0)
 
 

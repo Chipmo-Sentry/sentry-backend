@@ -16,9 +16,15 @@ from __future__ import annotations
 import httpx
 
 from sentry_backend.logging_setup import get_logger
-from sentry_backend.settings import get_settings
+from sentry_backend.settings import Settings, get_settings
 
 log = get_logger("sentry_backend.live_ai_client")
+
+
+def _ai_auth_headers(settings: Settings) -> dict[str, str] | None:
+    """Bearer header for sentry-ai's /v1/* routes, or None when no token is set."""
+    token = settings.sentry_ai_service_token
+    return {"Authorization": f"Bearer {token}"} if token else None
 
 
 def mediamtx_stream_url(mediamtx_path: str) -> str | None:
@@ -43,9 +49,12 @@ async def start_worker(mediamtx_path: str) -> bool:
         return False
 
     url = f"{settings.sentry_ai_url.rstrip('/')}/v1/live/start"
+    headers = _ai_auth_headers(settings)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(url, json={"camera_id": mediamtx_path, "rtsp_url": rtsp_url})
+            r = await client.post(
+                url, json={"camera_id": mediamtx_path, "rtsp_url": rtsp_url}, headers=headers
+            )
         if r.status_code in (200, 202):
             log.info("live_ai.start_ok", camera_id=mediamtx_path)
             return True
@@ -63,9 +72,10 @@ async def stop_worker(mediamtx_path: str) -> bool:
     if not settings.sentry_ai_url:
         return False
     url = f"{settings.sentry_ai_url.rstrip('/')}/v1/live/stop/{mediamtx_path}"
+    headers = _ai_auth_headers(settings)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(url)
+            r = await client.post(url, headers=headers)
         if r.status_code in (200, 202, 404):
             log.info("live_ai.stop_ok", camera_id=mediamtx_path, status=r.status_code)
             return True

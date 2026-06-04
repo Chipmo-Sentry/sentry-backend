@@ -1,7 +1,7 @@
 """Super-admin only — manage orgs, users, memberships, dashboard stats."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.ai_node import AiNode
 from sentry_backend.db.models.alert import Alert
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.store import Store
@@ -47,13 +48,62 @@ async def get_stats(
         result = await db.execute(select(func.count()).select_from(model))
         return int(result.scalar_one())
 
+    async def _count_where(model: type, *where: Any) -> int:
+        result = await db.execute(select(func.count()).select_from(model).where(*where))
+        return int(result.scalar_one())
+
+    now = datetime.now(UTC)
+    online_cutoff = now - timedelta(minutes=3)
+    day_ago = now - timedelta(hours=24)
     return AdminStats(
         orgs=await org_repo.count_orgs(db),
         users=await user_repo.count_users(db),
         stores=await _count(Store),
         cameras=await _count(Camera),
         alerts=await _count(Alert),
+        cameras_enabled=await _count_where(Camera, Camera.enabled.is_(True)),
+        ai_nodes=await _count_where(AiNode, AiNode.is_active.is_(True)),
+        ai_nodes_online=await _count_where(
+            AiNode, AiNode.is_active.is_(True), AiNode.last_seen_at >= online_cutoff
+        ),
+        alerts_24h=await _count_where(Alert, Alert.created_at >= day_ago),
     )
+
+
+@router.get("/analytics/alerts")
+async def alert_analytics(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+    range_: Annotated[str, Query(alias="range")] = "7d",
+) -> dict[str, object]:
+    """Alert breakdown for the observability dashboard (docs/19 Phase 2): how
+    many suspicion alerts fired in `range`, split by VLM category, by review
+    level, and by day — so you see WHAT the system is catching, over time."""
+    span = _METRIC_SPANS.get(range_, _METRIC_SPANS["7d"])
+    frm = datetime.now(UTC) - span
+
+    async def _group(col: Any) -> dict[str, int]:
+        rows = await db.execute(
+            select(col, func.count()).where(Alert.created_at >= frm).group_by(col)
+        )
+        return {str(k): int(v) for k, v in rows.all()}
+
+    by_category = await _group(Alert.category)
+    by_level = await _group(Alert.alert_level)
+    day_col = func.date_trunc("day", Alert.created_at).label("day")
+    day_rows = await db.execute(
+        select(day_col, func.count())
+        .where(Alert.created_at >= frm)
+        .group_by(day_col)
+        .order_by(day_col)
+    )
+    by_day = [{"day": d.isoformat(), "count": int(c)} for d, c in day_rows.all()]
+    return {
+        "total": sum(by_category.values()),
+        "by_category": by_category,
+        "by_level": by_level,
+        "by_day": by_day,
+    }
 
 
 @router.get("/orgs", response_model=list[OrganizationPublic])
