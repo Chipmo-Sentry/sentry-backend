@@ -35,13 +35,22 @@ class AiNodeHeartbeat(BaseModel):
     """Telemetry the node reports every ~60s."""
 
     fps_inference: float | None = None
-    vram_mb: int | None = None
+    vram_mb: int | None = None  # legacy alias; prefer vram_used_mb below
     active_cameras: int | None = None
     version: str | None = Field(default=None, max_length=64)
     # Per-dependency health the node probes locally (e.g. {"ollama": true,
     # "ingest": false, "ai": true}). Opaque map so the node can add keys
     # without a schema change; surfaced read-only in superadmin.
     health: dict[str, bool] | None = None
+    # Resource load for the observability dashboard (docs/19). GPU fields are
+    # None on a CPU-only node.
+    cpu_pct: float | None = None
+    ram_used_mb: int | None = None
+    ram_total_mb: int | None = None
+    gpu_pct: int | None = None
+    vram_used_mb: int | None = None
+    vram_total_mb: int | None = None
+    gpu_temp_c: int | None = None
 
 
 class AiNodePairingCodePublic(BaseModel):
