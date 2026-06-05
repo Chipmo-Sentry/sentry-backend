@@ -20,13 +20,15 @@ On confirmed breach (sustained > threshold for > sustain_sec, not in cooldown):
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from sqlalchemy import select
@@ -42,7 +44,6 @@ from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.services import alert_notify
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
-from sentry_backend.services.clip_cutter import ClipCutError, cut_window
 from sentry_backend.settings import get_settings
 
 log = get_logger("sentry_backend.threshold_handler")
@@ -196,22 +197,47 @@ class ThresholdHandler:
             peak_risk_pct=peak_risk_pct,
         )
 
-        # 1. Cut the clip from MediaMTX recordings
-        try:
-            cut = await cut_window(cam_path, start_offset_sec=-5, duration_sec=15)
-        except ClipCutError as e:
-            log.warning("threshold_handler.cut_failed", error=str(e))
+        # 1. Ask the AI node to cut the breach clip from ITS recordings AND
+        # verify it (split topology: the Railway backend can't read the node's
+        # MediaMTX recordings, so the cut + VLM both run on the node, which
+        # returns the verdict + the clip bytes — docs/19 I5).
+        ai_url = settings.sentry_ai_url
+        if not ai_url:
+            log.warning("threshold_handler.no_ai_url")
             return
+        try:
+            async with httpx.AsyncClient(timeout=settings.sentry_ai_timeout_sec) as client:
+                resp = await client.post(
+                    f"{ai_url}/v1/cut-verify",
+                    json={
+                        "mediamtx_path": cam_path,
+                        "store_id": str(camera.store_id) if camera.store_id else None,
+                        "camera_id": str(camera.id),
+                        "person_id": person_id,
+                        "peak_risk_pct": peak_risk_pct,
+                    },
+                )
+        except httpx.HTTPError as e:
+            log.warning("threshold_handler.cutverify_http_err", error=str(e))
+            return
+        if resp.status_code != 200:
+            log.warning(
+                "threshold_handler.cutverify_non_200",
+                status=resp.status_code,
+                body=resp.text[:200],
+            )
+            return
+        data: dict[str, Any] = resp.json()
 
-        # Stable sha256 of file. Sync read in async ctx is fine here — we're
-        # already in a fire-and-forget background task and clips are ~1-3 MB.
-        sha = hashlib.sha256()
-        with Path(cut.storage_path).open("rb") as f:  # noqa: ASYNC230
-            for chunk in iter(lambda: f.read(1 << 16), b""):
-                sha.update(chunk)
-        sha_hex = sha.hexdigest()
+        # 2. Persist the returned clip on the backend, then insert the Clip row.
+        clip_bytes = base64.b64decode(data["clip_b64"])
+        out_dir = Path(settings.clip_storage_dir).resolve()  # noqa: ASYNC240
+        out_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+        out_path = out_dir / f"live_{uuid4().hex}.mp4"
+        out_path.write_bytes(clip_bytes)  # noqa: ASYNC230
+        sha_hex = hashlib.sha256(clip_bytes).hexdigest()
+        captured_at = datetime.fromisoformat(data["captured_at"])
 
-        # 2. Insert Clip row (resolve org_id via Store)
         clip_id: UUID
         org_id_resolved: UUID
         async with session_scope() as db:
@@ -228,61 +254,38 @@ class ThresholdHandler:
                 organization_id=org_id_resolved,
                 store_id=cam_loaded.store_id,
                 camera_id=cam_loaded.id,
-                captured_at=cut.captured_at,
-                duration_sec=cut.duration_sec,
-                storage_path=cut.storage_path,
-                file_size_bytes=cut.file_size_bytes,
+                captured_at=captured_at,
+                duration_sec=float(data["duration_sec_clip"]),
+                storage_path=out_path.as_posix(),
+                file_size_bytes=int(data["file_size_bytes"]),
                 sha256=sha_hex,
             )
             db.add(clip)
             await db.flush()
             clip_id = clip.id
 
-        # 3. Call sentry-ai /v1/verify
-        ai_url = settings.sentry_ai_url
-        verify_data: dict[str, Any] | None = None
-        if ai_url:
-            try:
-                async with httpx.AsyncClient(timeout=settings.sentry_ai_timeout_sec) as client:
-                    resp = await client.post(
-                        f"{ai_url}/v1/verify",
-                        json={
-                            "clip_path": cut.storage_path,
-                            "store_id": str(camera.store_id) if camera.store_id else None,
-                            "camera_id": str(camera.id),
-                        },
-                    )
-                if resp.status_code == 200:
-                    verify_data = resp.json()
-                else:
-                    log.warning(
-                        "threshold_handler.verify_non_200",
-                        status=resp.status_code,
-                        body=resp.text[:200],
-                    )
-            except httpx.HTTPError as e:
-                log.warning("threshold_handler.verify_http_err", error=str(e))
-
-        # 4. Build alert fields (fall back to placeholders if VLM unreachable)
+        # 3. Build alert fields from the verify result.
         category = AlertCategory.other
         confidence = 0.0
         reasoning = (
-            f"Live threshold breach — VLM unreachable. Person #{person_id} "
+            f"Live threshold breach — VLM parse error. Person #{person_id} "
             f"peak risk {peak_risk_pct:.0f}%."
         )
         model_name = "n/a"
         latency = 0
-        if verify_data is not None:
-            with contextlib.suppress(KeyError, ValueError):
-                category = AlertCategory(verify_data["category"])
-                confidence = float(verify_data["confidence"])
-                reasoning = str(verify_data["reasoning"])
-                model_name = str(verify_data["model_name"])
-                latency = int(verify_data["inference_latency_ms"])
+        embedding: list[float] | None = None
+        with contextlib.suppress(KeyError, ValueError):
+            category = AlertCategory(data["category"])
+            confidence = float(data["confidence"])
+            reasoning = str(data["reasoning"])
+            model_name = str(data["model_name"])
+            latency = int(data["inference_latency_ms"])
+        if isinstance(data.get("embedding"), list):
+            embedding = [float(x) for x in data["embedding"]]
 
         level = derive_alert_level(category, confidence)
 
-        # 5. Insert Alert with full L5 context
+        # 4. Insert Alert with full L5 context (+ embedding for the RAG loop).
         alert_public: AlertPublic | None = None
         async with session_scope() as db:
             alert = await alert_repo.create_alert(
@@ -300,6 +303,7 @@ class ThresholdHandler:
                 triggered_by=AlertTrigger.live_threshold,
                 person_id=person_id,
                 peak_risk_pct=peak_risk_pct,
+                embedding=embedding,
             )
             alert_public = AlertPublic.model_validate(alert)
             # BE1 — best-effort Telegram ping for the live breach.
