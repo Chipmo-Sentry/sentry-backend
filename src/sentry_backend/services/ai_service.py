@@ -117,6 +117,13 @@ async def _verify_inner(clip_id: UUID, ai_base_url: str, timeout_sec: int) -> No
             model_name=str(data["model_name"]),
             alert_level=alert_level,
             inference_latency_ms=int(data["inference_latency_ms"]),
+            # RAG (docs/19 Phase 4): the AI node embedded `reasoning` at verify
+            # time; keep it so staff feedback can spawn a verified_case.
+            embedding=(
+                [float(x) for x in emb]
+                if isinstance((emb := data.get("embedding")), list)
+                else None
+            ),
         )
         # session_scope auto-commits on exit
         alert_public = AlertPublic.model_validate(alert)

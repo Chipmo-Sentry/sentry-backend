@@ -61,6 +61,7 @@ async def create_alert(
     triggered_by: AlertTrigger = AlertTrigger.manual_upload,
     person_id: int | None = None,
     peak_risk_pct: float | None = None,
+    embedding: list[float] | None = None,
 ) -> Alert:
     alert = Alert(
         clip_id=clip_id,
@@ -76,6 +77,7 @@ async def create_alert(
         triggered_by=triggered_by,
         person_id=person_id,
         peak_risk_pct=peak_risk_pct,
+        embedding=embedding,
     )
     db.add(alert)
     await db.flush()

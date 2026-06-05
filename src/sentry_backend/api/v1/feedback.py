@@ -10,7 +10,7 @@ from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import get_current_user
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.tenancy import get_current_organization_id
-from sentry_backend.repository import alert_repo, feedback_repo
+from sentry_backend.repository import alert_repo, feedback_repo, rag_case_repo
 from sentry_backend.schemas.feedback import FeedbackCreate, FeedbackPublic
 
 router = APIRouter(prefix="/api/v1/feedback", tags=["feedback"])
@@ -33,4 +33,16 @@ async def post_feedback(
         verdict=body.verdict,
         notes=body.notes,
     )
+    # Close the RAG loop (docs/19 Phase 4): a staff-verified alert whose reasoning
+    # the AI node already embedded becomes a retrievable case for this store — so
+    # future verifications get it as few-shot context. No re-embed needed.
+    if alert.embedding and alert.reasoning:
+        await rag_case_repo.add_case(
+            db,
+            store_id=alert.store_id,
+            verdict=str(body.verdict),
+            category=str(alert.category) if alert.category else None,
+            description=alert.reasoning,
+            embedding=list(alert.embedding),
+        )
     return FeedbackPublic.model_validate(fb)

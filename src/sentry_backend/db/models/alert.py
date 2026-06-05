@@ -3,7 +3,7 @@
 import enum
 from uuid import UUID
 
-from sqlalchemy import Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import ARRAY, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -79,3 +79,7 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     person_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # When triggered_by=live_threshold: peak risk_pct observed for this person
     peak_risk_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Embedding of `reasoning` computed by the AI node at verify time (docs/19
+    # Phase 4 RAG). Lets staff feedback create a verified_case for retrieval
+    # WITHOUT a second embed round-trip. Null on live-threshold alerts.
+    embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), nullable=True)
