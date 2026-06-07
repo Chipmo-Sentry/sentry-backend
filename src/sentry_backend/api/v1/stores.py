@@ -7,7 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
-from sentry_backend.deps.tenancy import get_current_organization_id
+from sentry_backend.deps.tenancy import (
+    get_current_organization_id,
+    get_current_organization_id_admin,
+)
 from sentry_backend.repository import store_repo
 from sentry_backend.schemas.store import StoreCreate, StorePublic, StoreUpdate
 
@@ -27,7 +30,7 @@ async def list_stores(
 async def create_store(
     body: StoreCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
 ) -> StorePublic:
     store = await store_repo.create_store(
         db,
@@ -57,7 +60,7 @@ async def update_store(
     store_id: UUID,
     body: StoreUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
 ) -> StorePublic:
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:
@@ -77,7 +80,7 @@ async def update_store(
 async def delete_store(
     store_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
 ) -> None:
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:

@@ -8,12 +8,13 @@ Two audiences:
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.ai_node import AiNode
 from sentry_backend.deps.ai_node_auth import get_current_ai_node
 from sentry_backend.deps.db import get_db
+from sentry_backend.ratelimit import limiter
 from sentry_backend.repository import ai_node_repo
 from sentry_backend.schemas.ai_node import (
     AiNodeConfig,
@@ -22,6 +23,7 @@ from sentry_backend.schemas.ai_node import (
     AiNodePairResult,
 )
 from sentry_backend.security import create_ai_node_token
+from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/ai-nodes", tags=["ai-nodes"])
 
@@ -31,7 +33,9 @@ def _config(node: AiNode) -> AiNodeConfig:
 
 
 @router.post("/pair", response_model=AiNodePairResult)
+@limiter.limit(lambda: get_settings().pair_rate_limit)
 async def pair_ai_node(
+    request: Request,  # noqa: ARG001 — required by slowapi's limiter
     body: AiNodePairRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AiNodePairResult:

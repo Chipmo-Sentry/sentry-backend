@@ -104,6 +104,32 @@ def decode_service_token(token: str) -> dict[str, Any]:
         raise ValueError(f"Invalid service token: {e}") from e
 
 
+def create_stream_token(mediamtx_path: str) -> str:
+    """Short-lived, per-path read token for WHEP/HLS playback.
+
+    Minted by the backend for an authenticated org member who owns the camera,
+    then appended to the MediaMTX stream URL (?jwt=…) and validated by the
+    backend's MediaMTX authHTTP endpoint. Replaces MediaMTX's `user: any` open
+    read so tenants can't watch each other's cameras. Signed with the user
+    secret; carries `typ=stream` + the allowed `path`.
+    """
+    settings = get_settings()
+    now = _now_utc()
+    exp = now + timedelta(seconds=settings.stream_token_ttl_sec)
+    payload: dict[str, Any] = {
+        "sub": mediamtx_path,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "typ": "stream",
+        "path": mediamtx_path,
+    }
+    return jwt.encode(
+        payload,
+        settings.jwt_secret.get_secret_value(),
+        algorithm=settings.jwt_algorithm,
+    )
+
+
 AGENT_TOKEN_TTL_DAYS = 365
 
 

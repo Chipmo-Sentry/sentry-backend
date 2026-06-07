@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     agent_stream_push_url: str | None = None
     mediamtx_publish_user: str | None = None
     mediamtx_publish_pass: str | None = None
+    # Per-camera read token (WHEP/HLS) TTL + the MediaMTX authHTTP shared secret.
+    # stream_token_ttl_sec covers a viewing session (reconnects reuse the URL).
+    # mediamtx_auth_secret, when set, must be sent by MediaMTX as the
+    # `Authorization: Bearer` header to the authHTTP endpoint (enforce-if-set).
+    stream_token_ttl_sec: int = 3600
+    mediamtx_auth_secret: str | None = None
     # Per-person cooldown after a live-threshold breach fires — debounces
     # repeated alerts from the same suspicious moment.
     live_breach_cooldown_sec: int = 30
@@ -116,6 +122,9 @@ class Settings(BaseSettings):
 
     # LD.2: per-IP rate limit on the public POST /api/v1/leads endpoint.
     lead_rate_limit: str = "5/hour"
+    # Per-IP rate limits on credential/pairing brute-force surfaces.
+    login_rate_limit: str = "10/minute"
+    pair_rate_limit: str = "10/minute"
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

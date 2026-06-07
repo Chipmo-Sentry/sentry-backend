@@ -33,7 +33,7 @@ from uuid import UUID, uuid4
 import httpx
 from sqlalchemy import select
 
-from sentry_backend.db.models.alert import AlertCategory, AlertTrigger
+from sentry_backend.db.models.alert import AlertCategory, AlertLevel, AlertTrigger
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.clip import Clip
 from sentry_backend.db.models.store import Store
@@ -103,17 +103,15 @@ class ThresholdHandler:
             return
 
         now = time.monotonic()
-        # As of behaviors-PATCH commit: scores are absolute (unbounded) and the
-        # color band is driven by the global behavior config's yellow_max.
-        # Alerts fire on color=red — keeps L5 trigger in sync with the UI's
-        # color thresholds (no separate per-camera risk_threshold).
+        # ADR-0022: risk_pct is normalized 0-100. A breach is risk_pct crossing
+        # the per-camera risk_threshold (default 70), sustained for N seconds.
+        # Every breach is then VLM-confirmed before any alert/notification fires.
 
         async with self._lock:
             self._maybe_cleanup(now)
             for t in tracks:
                 pid = t.get("person_id")
                 risk = t.get("risk_pct")
-                color = t.get("color")
                 if not isinstance(pid, int) or not isinstance(risk, (int, float)):
                     continue
                 key = (cam_path, pid)
@@ -129,7 +127,10 @@ class ThresholdHandler:
                 if now - st.last_breach_ts < settings.live_breach_cooldown_sec:
                     continue
 
-                if color == "red":
+                # Breach when the normalized risk_pct (0-100, ADR-0022) crosses
+                # this camera's tunable threshold (default 70). `color` is kept
+                # only for the live overlay.
+                if st.risk_pct >= camera.risk_threshold:
                     if st.above_threshold_since is None:
                         st.above_threshold_since = now
                     elif (
@@ -229,6 +230,40 @@ class ThresholdHandler:
             return
         data: dict[str, Any] = resp.json()
 
+        # 1b. VLM gate (ADR-0022) — parse the verdict FIRST. If the VLM is
+        # confident there's nothing (ignore: browsing / low confidence), drop the
+        # breach entirely: no clip stored, no alert row, no notification. This is
+        # what makes "every alert is VLM-confirmed" true and keeps false
+        # positives out of the alert list.
+        category = AlertCategory.other
+        confidence = 0.0
+        reasoning = (
+            f"Live threshold breach — VLM parse error. Person #{person_id} "
+            f"peak risk {peak_risk_pct:.0f}%."
+        )
+        model_name = "n/a"
+        latency = 0
+        embedding: list[float] | None = None
+        with contextlib.suppress(KeyError, ValueError):
+            category = AlertCategory(data["category"])
+            confidence = float(data["confidence"])
+            reasoning = str(data["reasoning"])
+            model_name = str(data["model_name"])
+            latency = int(data["inference_latency_ms"])
+        if isinstance(data.get("embedding"), list):
+            embedding = [float(x) for x in data["embedding"]]
+
+        level = derive_alert_level(category, confidence)
+        if level == AlertLevel.ignore:
+            log.info(
+                "threshold_handler.vlm_cleared",
+                camera_path=cam_path,
+                person_id=person_id,
+                category=category.value,
+                confidence=confidence,
+            )
+            return
+
         # 2. Persist the returned clip on the backend, then insert the Clip row.
         clip_bytes = base64.b64decode(data["clip_b64"])
         out_dir = Path(settings.clip_storage_dir).resolve()  # noqa: ASYNC240
@@ -264,26 +299,7 @@ class ThresholdHandler:
             await db.flush()
             clip_id = clip.id
 
-        # 3. Build alert fields from the verify result.
-        category = AlertCategory.other
-        confidence = 0.0
-        reasoning = (
-            f"Live threshold breach — VLM parse error. Person #{person_id} "
-            f"peak risk {peak_risk_pct:.0f}%."
-        )
-        model_name = "n/a"
-        latency = 0
-        embedding: list[float] | None = None
-        with contextlib.suppress(KeyError, ValueError):
-            category = AlertCategory(data["category"])
-            confidence = float(data["confidence"])
-            reasoning = str(data["reasoning"])
-            model_name = str(data["model_name"])
-            latency = int(data["inference_latency_ms"])
-        if isinstance(data.get("embedding"), list):
-            embedding = [float(x) for x in data["embedding"]]
-
-        level = derive_alert_level(category, confidence)
+        # 3. (verdict + level already parsed in step 1b; non-ignore reaches here)
 
         # 4. Insert Alert with full L5 context (+ embedding for the RAG loop).
         alert_public: AlertPublic | None = None

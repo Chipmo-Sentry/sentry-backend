@@ -19,7 +19,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         rec["del"].append(name)
         return True
 
-    async def start_worker(name: str) -> bool:
+    async def start_worker(name: str, store_id: str | None = None) -> bool:
         rec["start"].append(name)
         return True
 

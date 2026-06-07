@@ -62,8 +62,23 @@ async def _active_code(db: AsyncSession, code: str) -> AgentPairingCode | None:
 
 
 async def consume_pairing_code(db: AsyncSession, code: str) -> AgentPairingCode | None:
-    """Return the active code row (caller marks it consumed via mark_consumed)."""
-    return await _active_code(db, code)
+    """Lock + return the active code row (caller marks it consumed).
+
+    Uses SELECT … FOR UPDATE so two concurrent pair requests with the same code
+    serialize: the second blocks until the first commits, then the predicate
+    (consumed_at IS NULL) no longer matches and it returns None. Closes the
+    single-use TOCTOU. (On SQLite the lock is a no-op; tests run serially.)
+    """
+    result = await db.execute(
+        select(AgentPairingCode)
+        .where(
+            AgentPairingCode.code == code,
+            AgentPairingCode.consumed_at.is_(None),
+            AgentPairingCode.expires_at > _now(),
+        )
+        .with_for_update()
+    )
+    return result.scalar_one_or_none()
 
 
 async def create_agent(
