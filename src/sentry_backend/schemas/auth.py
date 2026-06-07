@@ -28,5 +28,6 @@ class UserPublic(BaseModel):
 
 
 class LoginResponse(BaseModel):
+    # Tokens are delivered ONLY as httpOnly SameSite=Lax cookies (ADR-0017), never
+    # in the body, so JavaScript/XSS cannot read them. The body carries the user.
     user: UserPublic
-    tokens: TokenPair

@@ -8,7 +8,7 @@ Two audiences:
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from sentry_backend.db.models.user import User
 from sentry_backend.deps.agent_auth import get_current_agent
 from sentry_backend.deps.auth import get_current_user
 from sentry_backend.deps.db import get_db
+from sentry_backend.ratelimit import limiter
 from sentry_backend.repository import agent_repo, camera_repo
 from sentry_backend.schemas.agent import (
     AgentCameraCreate,
@@ -109,7 +110,9 @@ async def revoke_agent(
 
 # ── Agent: pairing ──────────────────────────────────────────────────────
 @router.post("/agents/pair", response_model=AgentPairResult)
+@limiter.limit(lambda: get_settings().pair_rate_limit)
 async def pair_agent(
+    request: Request,  # noqa: ARG001 — required by slowapi's limiter
     body: AgentPairRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentPairResult:
@@ -180,7 +183,9 @@ async def agent_register_camera(
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()
     if cam.mediamtx_path and body.rtsp_url:
-        await live_provision.provision(cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled)
+        await live_provision.provision(
+            cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled, store_id=str(cam.store_id)
+        )
     return CameraPublic.from_orm_camera(cam)
 
 

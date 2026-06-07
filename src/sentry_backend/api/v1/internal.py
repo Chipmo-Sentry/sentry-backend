@@ -2,6 +2,7 @@
 
 import hmac
 from typing import Annotated, Literal
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +22,73 @@ from sentry_backend.services.threshold_handler import get_threshold_handler
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/internal", tags=["internal"])
+
+
+class MediaMtxAuthRequest(BaseModel):
+    """MediaMTX authHTTP payload (subset we use). MediaMTX POSTs this on every
+    publish/read/playback/api action when `authMethod: http`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    user: str = ""
+    password: str = ""
+    action: str = ""  # publish | read | playback | api | metrics | pprof
+    path: str = ""
+    query: str = ""  # raw URL query string (carries ?jwt=… for reads)
+
+
+def _stream_token_allows(query: str, path: str) -> bool:
+    """True iff the query carries a valid stream token scoped to `path`."""
+    params = parse_qs(query or "")
+    token = (params.get("jwt") or params.get("token") or [""])[0]
+    if not token:
+        return False
+    try:
+        payload = decode_user_token(token)
+    except ValueError:
+        return False
+    return payload.get("typ") == "stream" and payload.get("path") == path
+
+
+def _creds_match(user: str, password: str, exp_user: str | None, exp_pass: str | None) -> bool:
+    if not exp_user or not exp_pass:
+        return False
+    return hmac.compare_digest(user, exp_user) and hmac.compare_digest(password, exp_pass)
+
+
+@router.post("/mediamtx-auth", status_code=status.HTTP_204_NO_CONTENT)
+async def mediamtx_auth(
+    body: MediaMtxAuthRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
+    """MediaMTX authHTTP authorizer (replaces MediaMTX's open `user: any` read).
+
+    - read/playback → require a valid per-camera stream token in the query
+    - publish       → MediaMTX publish creds
+    - api/metrics/pprof → MediaMTX control-API creds
+    Returns 204 to allow, 401 to deny. Optionally gated by a shared secret so
+    only the MediaMTX host can call it.
+    """
+    settings = get_settings()
+    secret = settings.mediamtx_auth_secret
+    if secret and authorization != f"Bearer {secret}":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="bad auth secret")
+
+    action = body.action.lower()
+    allowed = False
+    if action in ("read", "playback"):
+        allowed = _stream_token_allows(body.query, body.path)
+    elif action == "publish":
+        allowed = _creds_match(
+            body.user, body.password, settings.mediamtx_publish_user, settings.mediamtx_publish_pass
+        )
+    elif action in ("api", "metrics", "pprof"):
+        allowed = _creds_match(
+            body.user, body.password, settings.mediamtx_api_user, settings.mediamtx_api_pass
+        )
+
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="denied")
 
 
 @router.post("/alerts", response_model=AlertPublic, status_code=status.HTTP_201_CREATED)

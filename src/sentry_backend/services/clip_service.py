@@ -10,6 +10,10 @@ from fastapi import UploadFile
 from sentry_backend.settings import get_settings
 
 
+class ClipTooLargeError(Exception):
+    """Upload exceeded max_clip_size_mb — raised mid-stream, partial file removed."""
+
+
 async def save_upload_to_disk(
     upload: UploadFile,
     *,
@@ -18,8 +22,13 @@ async def save_upload_to_disk(
     """Stream upload to disk, return (path, size, sha256). Caller persists row.
 
     Layout: {clip_storage_dir}/{org_id}/{yyyy-mm}/{uuid4}.mp4
+
+    Enforces the size cap WHILE streaming: once the running total exceeds
+    max_clip_size_mb the partial file is deleted and ClipTooLargeError is raised,
+    so an oversized upload can't fill the disk before rejection.
     """
     settings = get_settings()
+    max_bytes = settings.max_clip_size_mb * 1024 * 1024
     base = Path(settings.clip_storage_dir)
     now = datetime.now(UTC)
     subdir = base / str(organization_id) / now.strftime("%Y-%m")
@@ -29,11 +38,17 @@ async def save_upload_to_disk(
     hasher = hashlib.sha256()
     size = 0
 
-    with target.open("wb") as f:
-        while chunk := await upload.read(1024 * 1024):
-            f.write(chunk)
-            hasher.update(chunk)
-            size += len(chunk)
+    try:
+        with target.open("wb") as f:
+            while chunk := await upload.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise ClipTooLargeError
+                f.write(chunk)
+                hasher.update(chunk)
+    except ClipTooLargeError:
+        target.unlink(missing_ok=True)
+        raise
 
     return target, size, hasher.hexdigest()
 

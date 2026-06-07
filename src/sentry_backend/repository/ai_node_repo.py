@@ -65,7 +65,17 @@ async def create_pairing_code(
 
 
 async def consume_pairing_code(db: AsyncSession, code: str) -> AiNodePairingCode | None:
-    return await _active_code(db, code)
+    """Lock + return the active code row (atomic single-use; see agent_repo)."""
+    result = await db.execute(
+        select(AiNodePairingCode)
+        .where(
+            AiNodePairingCode.code == code,
+            AiNodePairingCode.consumed_at.is_(None),
+            AiNodePairingCode.expires_at > _now(),
+        )
+        .with_for_update()
+    )
+    return result.scalar_one_or_none()
 
 
 async def mark_consumed(db: AsyncSession, pairing: AiNodePairingCode, ai_node_id: UUID) -> None:

@@ -7,10 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
-from sentry_backend.deps.tenancy import get_current_organization_id
+from sentry_backend.deps.tenancy import (
+    get_current_organization_id,
+    get_current_organization_id_admin,
+)
 from sentry_backend.repository import camera_repo
-from sentry_backend.schemas.camera import CameraCreate, CameraPublic, CameraUpdate
+from sentry_backend.schemas.camera import (
+    CameraCreate,
+    CameraPublic,
+    CameraUpdate,
+    StreamTokenResponse,
+)
+from sentry_backend.security import create_stream_token
 from sentry_backend.services import live_provision
+from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/cameras", tags=["cameras"])
 
@@ -29,7 +39,7 @@ async def list_cameras(
 async def create_camera(
     body: CameraCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
 ) -> CameraPublic:
     cam = await camera_repo.create_camera(
         db,
@@ -52,7 +62,9 @@ async def create_camera(
     # is unreachable (operator can restart MediaMTX to pick up later).
     await db.commit()
     if cam.mediamtx_path and body.rtsp_url:
-        await live_provision.provision(cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled)
+        await live_provision.provision(
+            cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled, store_id=str(cam.store_id)
+        )
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -68,12 +80,36 @@ async def get_camera(
     return CameraPublic.from_orm_camera(cam)
 
 
+@router.get("/{camera_id}/stream-token", response_model=StreamTokenResponse)
+async def get_stream_token(
+    camera_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+) -> StreamTokenResponse:
+    """Mint a short-lived WHEP/HLS read token for a camera the caller owns.
+
+    Any org member (read access) may watch; the token confines playback to this
+    camera's mediamtx_path and is validated by the MediaMTX authHTTP endpoint.
+    """
+    cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
+    if cam is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+    if not cam.mediamtx_path:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Camera has no live stream path"
+        )
+    return StreamTokenResponse(
+        token=create_stream_token(cam.mediamtx_path),
+        expires_in=get_settings().stream_token_ttl_sec,
+    )
+
+
 @router.patch("/{camera_id}", response_model=CameraPublic)
 async def update_camera(
     camera_id: UUID,
     body: CameraUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
 ) -> CameraPublic:
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
@@ -99,7 +135,9 @@ async def update_camera(
     if cam.mediamtx_path:
         rtsp = await camera_repo.decrypt_rtsp_url(cam)
         if rtsp:
-            await live_provision.provision(cam.mediamtx_path, rtsp, enabled=cam.enabled)
+            await live_provision.provision(
+                cam.mediamtx_path, rtsp, enabled=cam.enabled, store_id=str(cam.store_id)
+            )
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -107,7 +145,7 @@ async def update_camera(
 async def delete_camera(
     camera_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
 ) -> None:
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:

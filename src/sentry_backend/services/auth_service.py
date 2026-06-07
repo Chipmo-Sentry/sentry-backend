@@ -7,13 +7,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentry_backend.db.models.user import User
 from sentry_backend.repository.user_repo import get_user_by_email
 from sentry_backend.schemas.auth import TokenPair
-from sentry_backend.security import create_user_token, verify_password
+from sentry_backend.security import create_user_token, hash_password, verify_password
+
+# Precomputed once at import: verified against on the user-missing branch so a
+# nonexistent email costs the same bcrypt work as a real one (flattens the
+# user-enumeration timing side channel).
+_DUMMY_HASH = hash_password("timing-equalizer")
 
 
 async def authenticate(db: AsyncSession, email: str, password: str) -> User | None:
     """Return the User on valid email+password, else None."""
     user = await get_user_by_email(db, email)
     if user is None or not user.is_active:
+        # Spend equivalent bcrypt time so missing/inactive users aren't faster.
+        verify_password(password, _DUMMY_HASH)
         return None
     if not verify_password(password, user.hashed_password):
         return None

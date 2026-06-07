@@ -7,10 +7,13 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sentry_backend.db.models.organization import OrganizationMember
+from sentry_backend.db.models.organization import OrganizationMember, OrgRole
 from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import get_current_user
 from sentry_backend.deps.db import get_db
+
+# Roles allowed to mutate org resources (stores, cameras, clip upload).
+_ADMIN_ROLES = (OrgRole.owner, OrgRole.admin)
 
 
 async def get_current_organization_id(
@@ -66,3 +69,32 @@ async def get_current_organization_id(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Multiple memberships — set X-Org-Id header",
     )
+
+
+async def get_current_organization_id_admin(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_org_id: Annotated[str | None, Header(alias="X-Org-Id")] = None,
+) -> UUID:
+    """Like get_current_organization_id but requires owner/admin role.
+
+    Gate for MUTATING org resources (ADR-0009): staff get read-only access, so
+    they must not create/delete stores/cameras or upload clips. Super-admins
+    bypass the role check.
+    """
+    org_id = await get_current_organization_id(user, db, x_org_id)
+    if user.is_super_admin:
+        return org_id
+    result = await db.execute(
+        select(OrganizationMember.role).where(
+            OrganizationMember.user_id == user.id,
+            OrganizationMember.organization_id == org_id,
+        )
+    )
+    role = result.scalar_one_or_none()
+    if role not in _ADMIN_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Requires owner or admin role",
+        )
+    return org_id

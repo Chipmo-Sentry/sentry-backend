@@ -39,6 +39,13 @@ class CameraUpdate(BaseModel):
     risk_threshold: float | None = Field(default=None, ge=0.0)
 
 
+class StreamTokenResponse(BaseModel):
+    """Short-lived per-camera WHEP/HLS read token (appended as ?jwt=…)."""
+
+    token: str
+    expires_in: int
+
+
 class CameraPublic(BaseModel):
     """Public Camera — `rtsp_url` NEVER exposed; only a boolean `has_rtsp_url`."""
 

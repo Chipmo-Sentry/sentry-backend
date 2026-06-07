@@ -38,8 +38,11 @@ def mediamtx_stream_url(mediamtx_path: str) -> str | None:
     return f"{base.rstrip('/')}/{mediamtx_path}"
 
 
-async def start_worker(mediamtx_path: str) -> bool:
-    """POST sentry-ai /v1/live/start for this camera. Never raises."""
+async def start_worker(mediamtx_path: str, store_id: str | None = None) -> bool:
+    """POST sentry-ai /v1/live/start for this camera. Never raises.
+
+    `store_id` enables store-scoped cross-camera re-ID on the node (ADR-0023).
+    """
     settings = get_settings()
     if not settings.sentry_ai_url or not settings.mediamtx_rtsp_url:
         log.debug("live_ai.disabled", reason="sentry_ai_url or mediamtx_rtsp_url unset")
@@ -50,11 +53,10 @@ async def start_worker(mediamtx_path: str) -> bool:
 
     url = f"{settings.sentry_ai_url.rstrip('/')}/v1/live/start"
     headers = _ai_auth_headers(settings)
+    body = {"camera_id": mediamtx_path, "rtsp_url": rtsp_url, "store_id": store_id}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(
-                url, json={"camera_id": mediamtx_path, "rtsp_url": rtsp_url}, headers=headers
-            )
+            r = await client.post(url, json=body, headers=headers)
         if r.status_code in (200, 202):
             log.info("live_ai.start_ok", camera_id=mediamtx_path)
             return True

@@ -10,12 +10,15 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
-from sentry_backend.deps.tenancy import get_current_organization_id
+from sentry_backend.deps.tenancy import (
+    get_current_organization_id,
+    get_current_organization_id_admin,
+)
 from sentry_backend.repository import camera_repo, clip_repo
 from sentry_backend.schemas.clip import ClipPublic
 from sentry_backend.services.ai_service import verify_clip_with_ai
 from sentry_backend.services.clip_service import (
-    clip_size_within_limit,
+    ClipTooLargeError,
     save_upload_to_disk,
 )
 
@@ -25,7 +28,7 @@ router = APIRouter(prefix="/api/v1/clips", tags=["clips"])
 @router.post("", response_model=ClipPublic, status_code=status.HTTP_201_CREATED)
 async def upload_clip(
     db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
     file: Annotated[UploadFile, File()],
     store_id: Annotated[UUID, Form()],
     camera_id: Annotated[UUID | None, Form()] = None,
@@ -49,14 +52,13 @@ async def upload_clip(
                 detail="Camera not found or not in specified store",
             )
 
-    storage_path, size_bytes, sha256 = await save_upload_to_disk(file, organization_id=org_id)
-
-    if not clip_size_within_limit(size_bytes):
-        storage_path.unlink(missing_ok=True)
+    try:
+        storage_path, size_bytes, sha256 = await save_upload_to_disk(file, organization_id=org_id)
+    except ClipTooLargeError as e:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="Clip exceeds max size",
-        )
+        ) from e
 
     # Dedup by sha256 within org
     existing = await clip_repo.find_clip_by_sha256_for_org(db, sha256, org_id)
