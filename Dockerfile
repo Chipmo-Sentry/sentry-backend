@@ -19,7 +19,11 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Now copy source + install the project itself
+# Now copy source + install the project itself.
+# CACHEBUST forces Railway to actually rebuild the source layer (recent deploys
+# were reusing a stale cached image and never picking up new code). Bump on deploy.
+ARG CACHEBUST=2026-06-08-isonline
+RUN echo "cachebust ${CACHEBUST}"
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
