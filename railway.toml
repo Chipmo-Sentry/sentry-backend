@@ -11,6 +11,13 @@ healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
 
+# ADR-0025: live_broker.py + alert_broker.py are IN-MEMORY per-process pub/sub.
+# sentry-ai publishes live metadata to one replica; the browser WS subscribes on
+# another → frames never cross the process boundary → no overlay / no behaviour.
+# MUST stay at 1 replica until the brokers move to Redis pub/sub (TODO M2 BE10).
+# ⚠️ Do NOT raise numReplicas before Redis lands, or live overlay breaks again.
+numReplicas = 1
+
 # Required env vars (set in Railway dashboard, NEVER committed):
 #   DATABASE_URL              — provided by Railway Postgres addon
 #   JWT_SECRET                — secrets.token_urlsafe(48)
