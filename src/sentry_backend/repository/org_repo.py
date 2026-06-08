@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,3 +68,15 @@ async def add_membership(
     db.add(member)
     await db.flush()
     return member
+
+
+async def remove_membership(
+    db: AsyncSession, *, user_id: UUID, organization_id: UUID
+) -> None:
+    await db.execute(
+        delete(OrganizationMember).where(
+            OrganizationMember.user_id == user_id,
+            OrganizationMember.organization_id == organization_id,
+        )
+    )
+    await db.flush()

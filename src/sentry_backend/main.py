@@ -23,6 +23,7 @@ from sentry_backend.api.v1 import clips as clips_v1
 from sentry_backend.api.v1 import feedback as feedback_v1
 from sentry_backend.api.v1 import internal as internal_v1
 from sentry_backend.api.v1 import leads as leads_v1
+from sentry_backend.api.v1 import org_team as org_team_v1
 from sentry_backend.api.v1 import stores as stores_v1
 from sentry_backend.db.session import dispose_engine, get_sessionmaker
 from sentry_backend.logging_setup import configure_logging, get_logger
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(leads_v1.router)
     app.include_router(internal_v1.router)
     app.include_router(admin_v1.router)
+    app.include_router(org_team_v1.router)
     app.include_router(agents_v1.router)
     app.include_router(ai_nodes_v1.router)
     app.include_router(behaviors_v1.router)

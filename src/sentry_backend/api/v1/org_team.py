@@ -1,0 +1,183 @@
+"""Org self-service: team members + email invites (owner/admin scope).
+
+Distinct from /api/v1/admin/* (super-admin, platform-wide). Every route here is
+scoped to the CALLER's organization via deps.tenancy, so a customer manages only
+their own org's users — they can never create organizations or touch other
+tenants. Org creation stays super-admin-only (platform onboarding).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import secrets
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from sentry_backend.db.models.organization import OrgRole
+from sentry_backend.db.models.user import User
+from sentry_backend.deps.auth import get_current_user
+from sentry_backend.deps.db import get_db
+from sentry_backend.deps.tenancy import (
+    get_current_organization_id,
+    get_current_organization_id_admin,
+)
+from sentry_backend.logging_setup import get_logger
+from sentry_backend.repository import invitation_repo, org_repo, user_repo
+from sentry_backend.schemas.admin import OrgMemberPublic
+from sentry_backend.schemas.auth import UserPublic
+from sentry_backend.schemas.org_team import (
+    AcceptInvite,
+    InviteCreate,
+    InviteResult,
+    PendingInvite,
+)
+from sentry_backend.services import email_service
+from sentry_backend.settings import get_settings
+
+log = get_logger("sentry_backend.api.org")
+router = APIRouter(prefix="/api/v1/org", tags=["org"])
+
+
+@router.get("/members", response_model=list[OrgMemberPublic])
+async def list_members(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+) -> list[OrgMemberPublic]:
+    """Members of the caller's org (any member may view their own team)."""
+    rows = await org_repo.list_members(db, org_id)
+    return [OrgMemberPublic(user=UserPublic.model_validate(u), role=r) for u, r in rows]
+
+
+@router.get("/invitations", response_model=list[PendingInvite])
+async def list_invitations(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
+) -> list[PendingInvite]:
+    rows = await invitation_repo.list_pending_for_org(db, org_id)
+    return [PendingInvite.model_validate(i) for i in rows]
+
+
+@router.post(
+    "/invitations", response_model=InviteResult, status_code=status.HTTP_201_CREATED
+)
+async def create_invitation(
+    body: InviteCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> InviteResult:
+    """Invite an email to the caller's org. Emails a tokenized accept link;
+    if SMTP isn't configured the link is returned for manual sharing."""
+    if await user_repo.get_user_by_email(db, body.email) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Энэ имэйл аль хэдийн бүртгэлтэй байна.",
+        )
+    s = get_settings()
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    expires_at = datetime.now(UTC) + timedelta(hours=s.invite_ttl_hours)
+    inv = await invitation_repo.create_invitation(
+        db,
+        email=body.email,
+        organization_id=org_id,
+        role=body.role,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        invited_by=actor.id,
+    )
+    invite_url = f"{s.app_base_url.rstrip('/')}/accept-invite?token={raw}"
+
+    org = await org_repo.get_org(db, org_id)
+    org_name = org.name if org else "Chipmo Sentry"
+    days = max(1, s.invite_ttl_hours // 24)
+    emailed = await email_service.send_email(
+        to=body.email,
+        subject=f"{org_name} — Chipmo Sentry урилга",
+        body_text=(
+            f"Сайн байна уу,\n\nТанд {org_name} байгууллагад нэгдэх урилга ирлээ. "
+            f"Доорх холбоосоор орж нууц үгээ тохируулна уу:\n\n{invite_url}\n\n"
+            f"Холбоос {days} хоногийн дараа хүчингүй болно.\n\n— Chipmo Sentry"
+        ),
+        body_html=(
+            f"<p>Сайн байна уу,</p><p>Танд <b>{org_name}</b> байгууллагад нэгдэх "
+            f'урилга ирлээ.</p><p><a href="{invite_url}">Урилгыг хүлээн авах</a></p>'
+            f"<p>Холбоос {days} хоногийн дараа хүчингүй болно.</p><p>— Chipmo Sentry</p>"
+        ),
+    )
+    log.info("org.invite_created", org_id=str(org_id), email=body.email, emailed=emailed)
+    return InviteResult(
+        id=inv.id,
+        email=inv.email,
+        role=inv.role,
+        invite_url=invite_url,
+        emailed=emailed,
+        expires_at=expires_at,
+    )
+
+
+@router.delete(
+    "/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def remove_member(
+    user_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    if user_id == actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Өөрийгөө хасч болохгүй.",
+        )
+    rows = await org_repo.list_members(db, org_id)
+    target = next(((u, r) for u, r in rows if u.id == user_id), None)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Энэ хэрэглэгч тус байгууллагын гишүүн биш байна.",
+        )
+    if target[1] == OrgRole.owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Байгууллагын эзнийг (owner) хасч болохгүй.",
+        )
+    await org_repo.remove_membership(db, user_id=user_id, organization_id=org_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/accept-invite", response_model=UserPublic, status_code=status.HTTP_201_CREATED
+)
+async def accept_invite(
+    body: AcceptInvite,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserPublic:
+    """Public — the invitee sets their password to create the account + join."""
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    inv = await invitation_repo.get_valid_by_token_hash(db, token_hash)
+    if inv is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Урилга хүчингүй эсвэл хугацаа дууссан байна.",
+        )
+    if await user_repo.get_user_by_email(db, inv.email) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Энэ имэйл аль хэдийн бүртгэлтэй байна.",
+        )
+    user = await user_repo.create_user(
+        db, email=inv.email, password=body.password, is_super_admin=False
+    )
+    await org_repo.add_membership(
+        db, user_id=user.id, organization_id=inv.organization_id, role=inv.role
+    )
+    await invitation_repo.mark_accepted(db, inv)
+    log.info("org.invite_accepted", org_id=str(inv.organization_id), email=inv.email)
+    return UserPublic.model_validate(user)

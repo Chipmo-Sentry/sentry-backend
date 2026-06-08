@@ -53,6 +53,22 @@ class Settings(BaseSettings):
     clip_storage_dir: str = "./storage/clips"
     max_clip_size_mb: int = 100
 
+    # Public base URL of the customer app — used to build invite links.
+    app_base_url: str = "http://localhost:3000"
+
+    # SMTP for transactional email (org user invites). All optional: when
+    # smtp_host is unset, sending is skipped and the invite link is returned in
+    # the API response so an admin can share it manually (so invites never block
+    # on email infra). For chipmo.mn Bizmail: host=bizmail16.itools.mn, port 465
+    # (SSL) or 587 (STARTTLS), user/from = a real mailbox e.g. info@chipmo.mn.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from: str | None = None  # e.g. "Chipmo Sentry <info@chipmo.mn>"
+    smtp_ssl: bool = False  # True = implicit SSL (port 465); False = STARTTLS (587)
+    invite_ttl_hours: int = 168  # 7 days
+
     sentry_ai_url: str | None = None  # e.g. http://localhost:8001 — None disables verify
     sentry_ai_timeout_sec: int = 60
     # Shared secret sent as `Authorization: Bearer` to sentry-ai's /v1/* routes.
