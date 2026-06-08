@@ -101,6 +101,30 @@ async def create_agent(
     return agent
 
 
+async def get_agent_by_name(
+    db: AsyncSession, store_id: UUID, name: str
+) -> Agent | None:
+    """The store's existing agent with this name (= the PC's hostname), if any.
+
+    Lets re-pairing the SAME computer REUSE its row instead of creating a
+    duplicate "connected computer". Prefers the most-recently-seen match.
+    """
+    result = await db.execute(
+        select(Agent)
+        .where(Agent.store_id == store_id, Agent.name == name)
+        .order_by(Agent.last_seen_at.desc().nullslast(), Agent.created_at.desc())
+    )
+    return result.scalars().first()
+
+
+async def reactivate_agent(db: AsyncSession, agent: Agent) -> None:
+    """A known computer paired again — bring it back online (token is reissued
+    by the caller), don't make a second row."""
+    agent.is_active = True
+    agent.last_seen_at = _now()
+    await db.flush()
+
+
 async def mark_consumed(db: AsyncSession, pairing: AgentPairingCode, agent_id: UUID) -> None:
     pairing.consumed_at = _now()
     pairing.agent_id = agent_id

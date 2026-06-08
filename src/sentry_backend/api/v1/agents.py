@@ -127,13 +127,22 @@ async def pair_agent(
     ).scalar_one_or_none()
     if store is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store no longer exists")
-    agent = await agent_repo.create_agent(
-        db,
-        organization_id=pairing.organization_id,
-        store_id=pairing.store_id,
-        name=body.name,
-        paired_by_user_id=pairing.created_by_user_id,
-    )
+    # Re-pairing the SAME computer (matched by hostname within the store) reuses
+    # its existing row instead of spawning a duplicate "connected computer" —
+    # the agent already sends name=hostname. New token is issued below either way.
+    agent = None
+    if body.name:
+        agent = await agent_repo.get_agent_by_name(db, pairing.store_id, body.name)
+    if agent is not None:
+        await agent_repo.reactivate_agent(db, agent)
+    else:
+        agent = await agent_repo.create_agent(
+            db,
+            organization_id=pairing.organization_id,
+            store_id=pairing.store_id,
+            name=body.name,
+            paired_by_user_id=pairing.created_by_user_id,
+        )
     await agent_repo.mark_consumed(db, pairing, agent.id)
     return AgentPairResult(
         agent_token=create_agent_token(agent.id),
