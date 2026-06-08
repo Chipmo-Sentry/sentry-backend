@@ -24,9 +24,7 @@ def is_configured() -> bool:
     return bool(s.smtp_host and s.smtp_from)
 
 
-async def send_email(
-    to: str, subject: str, body_text: str, body_html: str | None = None
-) -> bool:
+async def send_email(to: str, subject: str, body_text: str, body_html: str | None = None) -> bool:
     """Send one email. Returns True on success, False if unconfigured or failed."""
     s = get_settings()
     if not (s.smtp_host and s.smtp_from):

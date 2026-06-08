@@ -61,9 +61,7 @@ async def list_invitations(
     return [PendingInvite.model_validate(i) for i in rows]
 
 
-@router.post(
-    "/invitations", response_model=InviteResult, status_code=status.HTTP_201_CREATED
-)
+@router.post("/invitations", response_model=InviteResult, status_code=status.HTTP_201_CREATED)
 async def create_invitation(
     body: InviteCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -152,9 +150,7 @@ async def remove_member(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post(
-    "/accept-invite", response_model=UserPublic, status_code=status.HTTP_201_CREATED
-)
+@router.post("/accept-invite", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def accept_invite(
     body: AcceptInvite,
     db: Annotated[AsyncSession, Depends(get_db)],

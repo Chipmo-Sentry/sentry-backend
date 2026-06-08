@@ -1,9 +1,14 @@
 """AI node schemas — pairing, heartbeat, config, admin views."""
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
+
+# A node is "online" if its last heartbeat landed within this window. The
+# heartbeat interval is 60s; this tolerates a couple of missed/late beats
+# (the heartbeat process can lag under GPU load) without flapping.
+NODE_ONLINE_WINDOW = timedelta(minutes=5)
 
 
 class AiNodePairRequest(BaseModel):
@@ -80,6 +85,28 @@ class AiNodePublic(BaseModel):
     provider: str
     frame_skip: int
     created_at: datetime
+
+    @field_serializer("last_seen_at", "created_at")
+    def _ser_dt(self, v: datetime | None) -> str | None:
+        # Always emit a tz-aware ISO string so the browser never parses a naive
+        # UTC timestamp as local time (which made the node look hours stale →
+        # permanently "offline" in UTC+ timezones).
+        if v is None:
+            return None
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=UTC)
+        return v.isoformat()
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_online(self) -> bool:
+        """Server-computed online status — independent of the viewer's clock."""
+        if self.last_seen_at is None:
+            return False
+        ls = self.last_seen_at
+        if ls.tzinfo is None:
+            ls = ls.replace(tzinfo=UTC)
+        return datetime.now(UTC) - ls < NODE_ONLINE_WINDOW
 
 
 class AiNodeUpdate(BaseModel):

@@ -70,9 +70,7 @@ async def add_membership(
     return member
 
 
-async def remove_membership(
-    db: AsyncSession, *, user_id: UUID, organization_id: UUID
-) -> None:
+async def remove_membership(db: AsyncSession, *, user_id: UUID, organization_id: UUID) -> None:
     await db.execute(
         delete(OrganizationMember).where(
             OrganizationMember.user_id == user_id,
