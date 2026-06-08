@@ -51,6 +51,12 @@ class AiNodeHeartbeat(BaseModel):
     vram_used_mb: int | None = None
     vram_total_mb: int | None = None
     gpu_temp_c: int | None = None
+    # Sentry-project-only (process-scoped) usage — the project's own footprint,
+    # vs the whole-machine fields above. No sentry_gpu_pct (NVML utilisation is
+    # device-wide only; only VRAM is per-process).
+    sentry_cpu_pct: float | None = None
+    sentry_ram_mb: int | None = None
+    sentry_vram_mb: int | None = None
 
 
 class AiNodePairingCodePublic(BaseModel):

@@ -87,3 +87,8 @@ class AiNodeMetric(UUIDPrimaryKeyMixin, Base):
     gpu_temp_c: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fps_inference: Mapped[float | None] = mapped_column(Float, nullable=True)
     active_cameras: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Sentry-project-only (process-scoped) usage, alongside the whole-machine
+    # columns above. No sentry_gpu_pct — NVML utilisation is device-wide only.
+    sentry_cpu_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sentry_ram_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sentry_vram_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)

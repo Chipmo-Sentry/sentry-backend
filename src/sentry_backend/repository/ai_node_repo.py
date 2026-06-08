@@ -19,6 +19,9 @@ _METRIC_COLS = (
     "gpu_temp_c",
     "fps_inference",
     "active_cameras",
+    "sentry_cpu_pct",
+    "sentry_ram_mb",
+    "sentry_vram_mb",
 )
 
 _CODE_DIGITS = 6
