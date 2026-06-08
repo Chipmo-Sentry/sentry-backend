@@ -63,3 +63,13 @@ async def list_pending_for_org(db: AsyncSession, organization_id: UUID) -> list[
 async def mark_accepted(db: AsyncSession, inv: Invitation) -> None:
     inv.accepted_at = _now()
     await db.flush()
+
+
+async def get_invitation(db: AsyncSession, invitation_id: UUID) -> Invitation | None:
+    res = await db.execute(select(Invitation).where(Invitation.id == invitation_id))
+    return res.scalar_one_or_none()
+
+
+async def delete_invitation(db: AsyncSession, inv: Invitation) -> None:
+    await db.delete(inv)
+    await db.flush()

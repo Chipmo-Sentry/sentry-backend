@@ -119,6 +119,27 @@ async def create_invitation(
 
 
 @router.delete(
+    "/invitations/{invitation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def cancel_invitation(
+    invitation_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
+) -> Response:
+    """Revoke a pending invite. The token immediately stops working."""
+    inv = await invitation_repo.get_invitation(db, invitation_id)
+    if inv is None or inv.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Урилга олдсонгүй.",
+        )
+    await invitation_repo.delete_invitation(db, inv)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
     "/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
