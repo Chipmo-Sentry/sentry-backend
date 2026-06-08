@@ -101,9 +101,7 @@ async def create_agent(
     return agent
 
 
-async def get_agent_by_name(
-    db: AsyncSession, store_id: UUID, name: str
-) -> Agent | None:
+async def get_agent_by_name(db: AsyncSession, store_id: UUID, name: str) -> Agent | None:
     """The store's existing agent with this name (= the PC's hostname), if any.
 
     Lets re-pairing the SAME computer REUSE its row instead of creating a

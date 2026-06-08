@@ -39,7 +39,12 @@ def test_seed_dimensions_active_matches_detector() -> None:
 
 def test_placeholders_seed_inactive() -> None:
     by_key = {d["key"]: d for d in _seed_dimensions()}
-    for key in ("repeated_shelf_visit", "group_distraction", "exit_after_concealment", "rfid_mismatch"):
+    for key in (
+        "repeated_shelf_visit",
+        "group_distraction",
+        "exit_after_concealment",
+        "rfid_mismatch",
+    ):
         assert by_key[key]["active"] is False
         assert by_key[key]["has_detector"] is False
 
@@ -57,10 +62,22 @@ def test_default_thresholds_ordered() -> None:
 def test_reconcile_upgrades_pre_v2_row() -> None:
     # Simulate the deployed v1 row: 6 criteria, raw-scale thresholds, no v2 fields.
     v1_dims = [
-        {"key": "looking_around", "label_mn": "x", "description_mn": "", "weight": 1.5,
-         "active": True, "builtin": True},
-        {"key": "item_pickup", "label_mn": "x", "description_mn": "", "weight": 15.0,
-         "active": False, "builtin": True},  # operator disabled this one
+        {
+            "key": "looking_around",
+            "label_mn": "x",
+            "description_mn": "",
+            "weight": 1.5,
+            "active": True,
+            "builtin": True,
+        },
+        {
+            "key": "item_pickup",
+            "label_mn": "x",
+            "description_mn": "",
+            "weight": 15.0,
+            "active": False,
+            "builtin": True,
+        },  # operator disabled this one
     ]
     dims, thresholds, changed = _reconcile_v2(v1_dims, {"green_max": 5.0, "yellow_max": 16.0})
     assert changed
@@ -78,10 +95,22 @@ def test_reconcile_upgrades_pre_v2_row() -> None:
 
 def test_reconcile_preserves_custom_criteria() -> None:
     v1_dims = [
-        {"key": "looking_around", "label_mn": "x", "description_mn": "", "weight": 1.5,
-         "active": True, "builtin": True},
-        {"key": "my_custom", "label_mn": "Custom", "description_mn": "", "weight": 4.0,
-         "active": True, "builtin": False},
+        {
+            "key": "looking_around",
+            "label_mn": "x",
+            "description_mn": "",
+            "weight": 1.5,
+            "active": True,
+            "builtin": True,
+        },
+        {
+            "key": "my_custom",
+            "label_mn": "Custom",
+            "description_mn": "",
+            "weight": 4.0,
+            "active": True,
+            "builtin": False,
+        },
     ]
     dims, _t, _c = _reconcile_v2(v1_dims, {"green_max": 5.0, "yellow_max": 16.0})
     custom = next(d for d in dims if d["key"] == "my_custom")
