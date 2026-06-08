@@ -34,48 +34,189 @@ router = APIRouter(prefix="/api/v1/behaviors", tags=["behaviors"])
 BEHAVIOR_CONFIG_KEY = "behavior"
 KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 
-# === Built-in criteria seed (have detectors in sentry-ai) ===
+# === Behavior categories (ADR-0024 v2) ===
+# category + level group the criteria for the UI; level ≈ severity tier.
+CAT_SUSPICIOUS = "suspicious"  # LEVEL 1
+CAT_CONCEALMENT = "concealment"  # LEVEL 2
+CAT_ORGANIZED = "organized"  # LEVEL 3
+CAT_CRITICAL = "critical"  # LEVEL 4
+
+# === Built-in criteria seed (Behavior Engine v2, ADR-0024) ===
+# has_detector=True → sentry-ai has coded logic for this key (scores live).
+# has_detector=False → inert placeholder (shown in UI, scores 0) until a detector
+#   ships — blocked on zones (shelf/exit), multi-person, or hardware (RFID).
 BUILTIN_META: list[dict[str, Any]] = [
+    # ── LEVEL 1: SUSPICIOUS ──────────────────────────────────────────────
     {
         "key": "looking_around",
         "label_mn": "Орчноо харах",
-        "description_mn": "Нүүрний төв нь мөрний төвөөс хажуу тийш эргэсэн — санаатай эргэн харах дохио.",
-        "weight": 1.5,
+        "description_mn": "Хүн орчин, ажилтан, гарц, камерыг давтан ажиглах.",
+        "weight": 2.0,
+        "category": CAT_SUSPICIOUS,
+        "level": 1,
+        "has_detector": True,
     },
     {
-        "key": "item_pickup",
-        "label_mn": "Бараа авах",
-        "description_mn": "Бугуй нь COCO-аар илрүүлсэн барааны bbox дотор орсон — 'holding' төлвийг идэвхжүүлнэ.",
-        "weight": 15.0,
-    },
-    {
-        "key": "body_block",
-        "label_mn": "Биеэр далдлах",
-        "description_mn": "Мөрний өргөн rolling average-н 55%-аас бага — камер руу нуруугаа эргүүлж далдлах.",
+        "key": "loitering",
+        "label_mn": "Удаан зогсох",
+        "description_mn": "Нэг тавиурын бүсэд тохируулсан хугацаанаас удаан зогсох (default 30 сек).",
         "weight": 3.0,
+        "category": CAT_SUSPICIOUS,
+        "level": 1,
+        "has_detector": True,
     },
     {
-        "key": "crouch",
-        "label_mn": "Бөхийх",
-        "description_mn": "Бие/мөрнөөс хонго хүртэлх босоо урт хүний өндрийн 15%-аар агшсан — доогуур бараа авах/нуух.",
-        "weight": 1.0,
-    },
-    {
-        "key": "wrist_to_torso",
-        "label_mn": "Хувцас доор нуух",
-        "description_mn": "Бугуй хонгоны y-аас 15% дотор удаан үлдсэн — халаас/уут руу нуух. Бараа барьсан үед л идэвхжинэ.",
-        "weight": 5.0,
+        "key": "repeated_shelf_visit",
+        "label_mn": "Тавиур давтан зочлох",
+        "description_mn": "Нэг тавиур/бараанд олон удаа эргэж ирэх. ⚠ Бүс (shelf zone) шаардана — одоогоор идэвхгүй.",
+        "weight": 3.0,
+        "category": CAT_SUSPICIOUS,
+        "level": 1,
+        "has_detector": False,
     },
     {
         "key": "rapid_movement",
         "label_mn": "Хурдан хөдөлгөөн",
-        "description_mn": "Бугуйн хурд хүний өндрийн 8%-аас илүү — нуух/эргэлзэх хурдан гар үйлдэл. Бараа барьсан үед л.",
-        "weight": 1.5,
+        "description_mn": "Бараа орчмын хэт хурдан гар/биеийн хөдөлгөөн. Бараа барьсан үед л.",
+        "weight": 2.0,
+        "category": CAT_SUSPICIOUS,
+        "level": 1,
+        "has_detector": True,
+    },
+    # ── LEVEL 2: CONCEALMENT ─────────────────────────────────────────────
+    {
+        "key": "item_pickup",
+        "label_mn": "Бараа авах",
+        "description_mn": "Бугуй COCO барааны bbox дотор — 'holding' төлөв идэвхжинэ (хэвийн худалдан авалт).",
+        "weight": 10.0,
+        "category": CAT_CONCEALMENT,
+        "level": 2,
+        "has_detector": True,
+    },
+    {
+        "key": "wrist_to_torso",
+        "label_mn": "Хувцас доор нуух",
+        "description_mn": "Барьсан бараагаа бие/хувцас/халаас/уут руу ойртуулах. Гол нуун далдлалтын дохио.",
+        "weight": 12.0,
+        "category": CAT_CONCEALMENT,
+        "level": 2,
+        "has_detector": True,
+    },
+    {
+        "key": "body_block",
+        "label_mn": "Биеэр далдлах",
+        "description_mn": "Барааны үйлдлийг камераас санаатай биеэрээ халхлах.",
+        "weight": 5.0,
+        "category": CAT_CONCEALMENT,
+        "level": 2,
+        "has_detector": True,
+    },
+    {
+        "key": "crouch",
+        "label_mn": "Бөхийх",
+        "description_mn": "Бараа орчим бөхийж сууж бараатай харьцах.",
+        "weight": 2.0,
+        "category": CAT_CONCEALMENT,
+        "level": 2,
+        "has_detector": True,
+    },
+    {
+        "key": "bag_interaction",
+        "label_mn": "Гар уут руу",
+        "description_mn": "Бараа барьсан үедээ уут нээх/гар уут руу хийх (handbag/backpack илрэлт).",
+        "weight": 15.0,
+        "category": CAT_CONCEALMENT,
+        "level": 2,
+        "has_detector": True,
+    },
+    {
+        "key": "pocket_interaction",
+        "label_mn": "Халаас руу",
+        "description_mn": "Бараа барьсан үедээ гараа халаасны ойролцоо аваачих.",
+        "weight": 12.0,
+        "category": CAT_CONCEALMENT,
+        "level": 2,
+        "has_detector": True,
+    },
+    # ── LEVEL 3: ORGANIZED (multi-person — detector pending) ──────────────
+    {
+        "key": "group_distraction",
+        "label_mn": "Бүлгийн сатаатуулалт",
+        "description_mn": "Нэг нь ажилтныг сатааруулж, нөгөө нь бараа авах зохицуулсан үйлдэл. ⚠ Олон хүний шинжилгээ шаардана — идэвхгүй.",
+        "weight": 20.0,
+        "category": CAT_ORGANIZED,
+        "level": 3,
+        "has_detector": False,
+    },
+    {
+        "key": "coordinated_activity",
+        "label_mn": "Зохицуулсан үйлдэл",
+        "description_mn": "Олон хүн нэг барааны бүсэд зохицуулан үйлдэх. ⚠ Олон хүний шинжилгээ шаардана — идэвхгүй.",
+        "weight": 15.0,
+        "category": CAT_ORGANIZED,
+        "level": 3,
+        "has_detector": False,
+    },
+    # ── LEVEL 4: CRITICAL ────────────────────────────────────────────────
+    {
+        "key": "concealment_sequence",
+        "label_mn": "Нуун далдлах дараалал",
+        "description_mn": "Бараа авах → хувцас доор → уут/халаас. Дараалал бүрэн болоход шууд ALERT.",
+        "weight": 30.0,
+        "category": CAT_CRITICAL,
+        "level": 4,
+        "has_detector": True,
+    },
+    {
+        "key": "exit_after_concealment",
+        "label_mn": "Нуусны дараа гарц руу",
+        "description_mn": "Нуун далдлалтын дараа дэлгүүрийн гарц руу хөдлөх. ⚠ Гарцын бүс шаардана — идэвхгүй.",
+        "weight": 50.0,
+        "category": CAT_CRITICAL,
+        "level": 4,
+        "has_detector": False,
+    },
+    {
+        "key": "rfid_mismatch",
+        "label_mn": "RFID зөрчил",
+        "description_mn": "Камер нуун далдлалт илрүүлсэн боловч RFID бараа төлбөргүй идэвхтэй хэвээр. ⚠ RFID тоног төхөөрөмж шаардана — идэвхгүй.",
+        "weight": 100.0,
+        "category": CAT_CRITICAL,
+        "level": 4,
+        "has_detector": False,
     },
 ]
 BUILTIN_KEYS = {d["key"] for d in BUILTIN_META}
 
-DEFAULT_THRESHOLDS: dict[str, float] = {"green_max": 5.0, "yellow_max": 15.0}
+# Sequence rules (read-only, for the UI timeline) — mirrors sentry-ai
+# behavior.DEFAULT_SEQUENCES. Bonus for `concealment_sequence` is tunable via its
+# catalog weight; the rest are fixed engine rules.
+SEQUENCE_META: list[dict[str, Any]] = [
+    {"key": "seq_look_pickup", "pattern": ["looking_around", "item_pickup"], "bonus": 5.0},
+    {"key": "seq_pickup_wrist", "pattern": ["item_pickup", "wrist_to_torso"], "bonus": 10.0},
+    {"key": "seq_pickup_bag", "pattern": ["item_pickup", "bag_interaction"], "bonus": 15.0},
+    {
+        "key": "seq_pickup_wrist_bag",
+        "pattern": ["item_pickup", "wrist_to_torso", "bag_interaction"],
+        "bonus": 25.0,
+    },
+    {
+        "key": "seq_loiter_pickup_conceal",
+        "pattern": ["loitering", "item_pickup", "concealment"],
+        "bonus": 15.0,
+    },
+    {
+        "key": "concealment_sequence",
+        "pattern": ["item_pickup", "wrist_to_torso", "bag/pocket"],
+        "bonus": 30.0,
+    },
+]
+
+# Risk levels (absolute 0-100, ADR-0024): LOW 0-10 / MEDIUM 11-25 / HIGH 26-50 /
+# CRITICAL 51-100. green_max = LOW/MEDIUM cut, yellow_max = MEDIUM/HIGH cut,
+# high_max = HIGH/CRITICAL cut.
+DEFAULT_THRESHOLDS: dict[str, float] = {"green_max": 10.0, "yellow_max": 25.0, "high_max": 50.0}
+_THRESHOLD_KEYS = {"green_max", "yellow_max", "high_max"}
 
 
 # === Schemas ===
@@ -85,19 +226,37 @@ class BehaviorDimension(BaseModel):
     description_mn: str
     weight: float
     active: bool
-    # builtin == has a coded detector in sentry-ai. `active_in_m1` kept for
-    # frontend back-compat; equals `builtin`.
+    # v2 (ADR-0024): category + severity level for grouped UI display.
+    category: str = CAT_SUSPICIOUS
+    level: int = 1
+    # has_detector == sentry-ai scores this key live. False → inert placeholder
+    # (zones/multi-person/RFID pending). `active_in_m1`/`builtin` kept for
+    # frontend back-compat; both equal has_detector for built-ins.
+    has_detector: bool = True
     active_in_m1: bool
     builtin: bool
+
+
+class SequenceInfo(BaseModel):
+    key: str
+    pattern: list[str]
+    bonus: float
 
 
 class BehaviorConfig(BaseModel):
     dimensions: list[BehaviorDimension]
     thresholds: dict[str, float]
+    sequences: list[SequenceInfo] = []
     color_labels: dict[str, str] = {
         "green": "Хэвийн",
         "yellow": "Анхаар",
         "red": "Сэжигтэй",
+    }
+    level_labels: dict[str, str] = {
+        "LOW": "Бага",
+        "MEDIUM": "Дунд",
+        "HIGH": "Өндөр",
+        "CRITICAL": "Ноцтой",
     }
 
 
@@ -122,7 +281,7 @@ class BehaviorConfigPatch(BaseModel):
     def check_thresholds(cls, v: dict[str, float] | None) -> dict[str, float] | None:
         if v is None:
             return None
-        unknown = set(v.keys()) - {"green_max", "yellow_max"}
+        unknown = set(v.keys()) - _THRESHOLD_KEYS
         if unknown:
             raise ValueError(f"unknown threshold(s): {sorted(unknown)}")
         for k, val in v.items():
@@ -136,6 +295,8 @@ class DimensionCreate(BaseModel):
     label_mn: str = Field(min_length=1, max_length=120)
     description_mn: str = Field(default="", max_length=1000)
     weight: float = Field(default=1.0, ge=0)
+    category: str = Field(default=CAT_SUSPICIOUS)
+    level: int = Field(default=1, ge=1, le=4)
 
     @field_validator("key")
     @classmethod
@@ -150,21 +311,71 @@ class DimensionUpdate(BaseModel):
     description_mn: str | None = Field(default=None, max_length=1000)
     weight: float | None = Field(default=None, ge=0)
     active: bool | None = None
+    category: str | None = None
+    level: int | None = Field(default=None, ge=1, le=4)
 
 
 # === Catalog persistence ===
+def _seed_one(m: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "key": m["key"],
+        "label_mn": m["label_mn"],
+        "description_mn": m["description_mn"],
+        "weight": float(m["weight"]),
+        # Detector-backed criteria seed active; inert placeholders seed disabled.
+        "active": bool(m["has_detector"]),
+        "category": m["category"],
+        "level": int(m["level"]),
+        "has_detector": bool(m["has_detector"]),
+        "builtin": True,
+    }
+
+
 def _seed_dimensions() -> list[dict[str, Any]]:
-    return [
-        {
-            "key": m["key"],
-            "label_mn": m["label_mn"],
-            "description_mn": m["description_mn"],
-            "weight": float(m["weight"]),
-            "active": True,
-            "builtin": True,
-        }
-        for m in BUILTIN_META
-    ]
+    return [_seed_one(m) for m in BUILTIN_META]
+
+
+def _reconcile_v2(
+    dims: list[dict[str, Any]], thresholds: dict[str, float]
+) -> tuple[list[dict[str, Any]], dict[str, float], bool]:
+    """Upgrade an existing catalog to the v2 (ADR-0024) shape in place.
+
+    Existing deployments hold a pre-v2 `app_config['behavior']` row (the 6 v1
+    criteria, raw-scale thresholds). Seeding only runs on a MISSING row, so
+    without this those rows would never gain the new criteria/levels. Idempotent.
+
+    - Pre-v2 row (no `high_max`, or built-ins missing `has_detector`): the score
+      scale changed, so re-seed ALL built-ins from meta (resets weights to the v2
+      anchors, adds the new criteria + placeholders) and reset thresholds to v2
+      defaults. Operator-added CUSTOM criteria are preserved. The operator's
+      enable/disable toggle on pre-existing built-ins is preserved.
+    - Already-v2 row: additive only — append any built-in keys meta gained since,
+      leave operator weight/active edits untouched.
+    """
+    by_key = {d["key"]: d for d in dims}
+    stored_builtins = [d for d in dims if d.get("builtin")]
+    is_v2 = (
+        "high_max" in thresholds
+        and BUILTIN_KEYS.issubset(by_key.keys())
+        and all("has_detector" in d for d in stored_builtins)
+    )
+
+    if is_v2:
+        changed = False
+        for m in BUILTIN_META:
+            if m["key"] not in by_key:
+                dims.append(_seed_one(m))
+                changed = True
+        return dims, thresholds, changed
+
+    # Pre-v2 → full upgrade. Preserve custom criteria + operator active toggles.
+    custom = [d for d in dims if not d.get("builtin") and d["key"] not in BUILTIN_KEYS]
+    new_builtins = _seed_dimensions()
+    for nb in new_builtins:
+        old = by_key.get(nb["key"])
+        if old is not None and "active" in old:
+            nb["active"] = bool(old["active"])
+    return new_builtins + custom, dict(DEFAULT_THRESHOLDS), True
 
 
 async def _load_catalog(
@@ -181,6 +392,9 @@ async def _load_catalog(
         )
         db.add(row)
         await db.flush()
+        value = dict(row.value)
+        return row, value["dimensions"], value["thresholds"]
+
     value = dict(row.value)
     thresholds = {**DEFAULT_THRESHOLDS, **value.get("thresholds", {})}
     dims = value.get("dimensions")
@@ -191,26 +405,46 @@ async def _load_catalog(
         for d in dims:
             if d["key"] in old_weights:
                 d["weight"] = float(old_weights[d["key"]])
+
+    # Reconcile to the v2 catalog (adds new criteria/levels to existing rows).
+    dims, thresholds, changed = _reconcile_v2(dims, thresholds)
+    if changed or value.get("dimensions") != dims or value.get("thresholds") != thresholds:
         row.value = {"dimensions": dims, "thresholds": thresholds}
         await db.flush()
     return row, dims, thresholds
 
 
+_BUILTIN_BY_KEY = {m["key"]: m for m in BUILTIN_META}
+
+
 def _to_response(dims: list[dict[str, Any]], thresholds: dict[str, float]) -> BehaviorConfig:
-    return BehaviorConfig(
-        dimensions=[
+    out: list[BehaviorDimension] = []
+    for d in dims:
+        # Backfill v2 fields for rows seeded before ADR-0024 (built-ins from meta).
+        meta = _BUILTIN_BY_KEY.get(d["key"], {})
+        category = d.get("category") or meta.get("category", CAT_SUSPICIOUS)
+        level = int(d.get("level") or meta.get("level", 1))
+        has_detector = d.get("has_detector")
+        if has_detector is None:
+            has_detector = bool(meta.get("has_detector", d.get("builtin", False)))
+        out.append(
             BehaviorDimension(
                 key=d["key"],
                 label_mn=d["label_mn"],
                 description_mn=d.get("description_mn", ""),
                 weight=float(d["weight"]),
                 active=bool(d.get("active", True)),
-                active_in_m1=bool(d.get("builtin", False)),
+                category=category,
+                level=level,
+                has_detector=bool(has_detector),
+                active_in_m1=bool(has_detector),
                 builtin=bool(d.get("builtin", False)),
             )
-            for d in dims
-        ],
+        )
+    return BehaviorConfig(
+        dimensions=out,
         thresholds=thresholds,
+        sequences=[SequenceInfo(**s) for s in SEQUENCE_META],
     )
 
 
@@ -235,10 +469,10 @@ async def patch_behavior_config(
                 d["weight"] = float(body.weights[d["key"]])
     if body.thresholds:
         new_t = {**thresholds, **body.thresholds}
-        if new_t["green_max"] >= new_t["yellow_max"]:
+        if not (new_t["green_max"] < new_t["yellow_max"] < new_t.get("high_max", float("inf"))):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="green_max must be < yellow_max",
+                detail="thresholds must satisfy green_max < yellow_max < high_max",
             )
         thresholds = new_t
     row.value = {"dimensions": dims, "thresholds": thresholds}
@@ -264,6 +498,10 @@ async def add_dimension(
             "description_mn": body.description_mn,
             "weight": float(body.weight),
             "active": True,
+            "category": body.category,
+            "level": body.level,
+            # Custom criteria have no coded detector until one ships in sentry-ai.
+            "has_detector": False,
             "builtin": False,
         }
     )
@@ -290,6 +528,10 @@ async def update_dimension(
         target["weight"] = float(body.weight)
     if body.active is not None:
         target["active"] = body.active
+    if body.category is not None:
+        target["category"] = body.category
+    if body.level is not None:
+        target["level"] = body.level
     row.value = {"dimensions": dims, "thresholds": thresholds}
     return _to_response(dims, thresholds)
 
