@@ -53,3 +53,9 @@ class AcceptInvite(BaseModel):
 
     token: str = Field(min_length=10)
     password: str = Field(min_length=8, max_length=128)
+
+
+class MemberUpdate(BaseModel):
+    """Org admin toggles a member's access (lock = is_active False)."""
+
+    is_active: bool

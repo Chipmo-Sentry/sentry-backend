@@ -33,6 +33,7 @@ from sentry_backend.schemas.org_team import (
     AcceptInvite,
     InviteCreate,
     InviteResult,
+    MemberUpdate,
     PendingInvite,
 )
 from sentry_backend.services import email_service
@@ -169,6 +170,40 @@ async def remove_member(
         )
     await org_repo.remove_membership(db, user_id=user_id, organization_id=org_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/members/{user_id}", response_model=OrgMemberPublic)
+async def update_member(
+    user_id: UUID,
+    body: MemberUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id_admin)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> OrgMemberPublic:
+    """Lock (is_active=false) or unlock a member. Locking blocks their login
+    immediately without deleting the account. Can't lock yourself or the owner."""
+    if user_id == actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Өөрийгөө түгжиж болохгүй.",
+        )
+    rows = await org_repo.list_members(db, org_id)
+    target = next(((u, r) for u, r in rows if u.id == user_id), None)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Энэ хэрэглэгч тус байгууллагын гишүүн биш байна.",
+        )
+    if target[1] == OrgRole.owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Байгууллагын эзнийг (owner) түгжиж болохгүй.",
+        )
+    user = await user_repo.update_user_flags(db, target[0], is_active=body.is_active)
+    log.info(
+        "org.member_access", org_id=str(org_id), user_id=str(user_id), active=body.is_active
+    )
+    return OrgMemberPublic(user=UserPublic.model_validate(user), role=target[1])
 
 
 @router.post("/accept-invite", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
