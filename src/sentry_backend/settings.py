@@ -70,7 +70,11 @@ class Settings(BaseSettings):
     invite_ttl_hours: int = 168  # 7 days
 
     sentry_ai_url: str | None = None  # e.g. http://localhost:8001 — None disables verify
-    sentry_ai_timeout_sec: int = 60
+    # Generous: the AI node's /v1/cut-verify runs a full VLM inference, which on
+    # a GPU shared with the live YOLO workers measures ~100-125s. A tighter
+    # timeout made the backend abandon the call before the verdict came back, so
+    # the breach produced no alert/clip. (Lower this once the VLM is sped up.)
+    sentry_ai_timeout_sec: int = 180
     # Shared secret sent as `Authorization: Bearer` to sentry-ai's /v1/* routes.
     # None/empty → no header (sentry-ai must then be unauthenticated/LAN-only).
     # Set the SAME value here and as sentry-ai's AI_SERVICE_TOKEN in prod.
