@@ -8,9 +8,11 @@ from pydantic import ValidationError
 from sentry_backend.api.v1.behaviors import (
     BUILTIN_KEYS,
     BUILTIN_META,
+    DEFAULT_ENGINE,
     DEFAULT_THRESHOLDS,
     BehaviorConfigPatch,
     DimensionCreate,
+    DimensionUpdate,
     _reconcile_v2,
     _seed_dimensions,
 )
@@ -79,7 +81,9 @@ def test_reconcile_upgrades_pre_v2_row() -> None:
             "builtin": True,
         },  # operator disabled this one
     ]
-    dims, thresholds, changed = _reconcile_v2(v1_dims, {"green_max": 5.0, "yellow_max": 16.0})
+    dims, thresholds, _engine, changed = _reconcile_v2(
+        v1_dims, {"green_max": 5.0, "yellow_max": 16.0}, {}
+    )
     assert changed
     keys = {d["key"] for d in dims}
     assert BUILTIN_KEYS.issubset(keys)  # all 15 v2 criteria now present
@@ -112,14 +116,16 @@ def test_reconcile_preserves_custom_criteria() -> None:
             "builtin": False,
         },
     ]
-    dims, _t, _c = _reconcile_v2(v1_dims, {"green_max": 5.0, "yellow_max": 16.0})
+    dims, _t, _e, _c = _reconcile_v2(v1_dims, {"green_max": 5.0, "yellow_max": 16.0}, {})
     custom = next(d for d in dims if d["key"] == "my_custom")
     assert custom["weight"] == 4.0 and custom["builtin"] is False
 
 
 def test_reconcile_v2_row_is_idempotent() -> None:
     dims = _seed_dimensions()
-    out, thresholds, changed = _reconcile_v2(dims, dict(DEFAULT_THRESHOLDS))
+    out, thresholds, _engine, changed = _reconcile_v2(
+        dims, dict(DEFAULT_THRESHOLDS), dict(DEFAULT_ENGINE)
+    )
     assert changed is False
     assert len(out) == len(dims)
     assert thresholds == DEFAULT_THRESHOLDS
@@ -169,3 +175,39 @@ def test_slugify_mongolian_falls_back() -> None:
 
 def test_slugify_truncates_long() -> None:
     assert len(_slugify("a" * 100)) <= 50
+
+
+# === Engine knobs + per-detector params (ADR-0024 v2 fine-tuning) ===
+def test_seed_includes_detector_params() -> None:
+    dims = _seed_dimensions()
+    loiter = next(d for d in dims if d["key"] == "loitering")
+    assert loiter["params"]["seconds"] == 30.0
+    looking = next(d for d in dims if d["key"] == "looking_around")
+    assert looking["params"]["offset_frac"] == 0.15
+
+
+def test_reconcile_backfills_engine_and_params() -> None:
+    # Simulate a v2 row seeded BEFORE per-detector params / engine shipped.
+    dims = _seed_dimensions()
+    for d in dims:
+        d.pop("params", None)
+    out, _t, engine, changed = _reconcile_v2(dims, dict(DEFAULT_THRESHOLDS), {})
+    assert changed is True
+    assert engine == DEFAULT_ENGINE
+    assert next(d for d in out if d["key"] == "loitering")["params"]["seconds"] == 30.0
+
+
+def test_engine_patch_validation() -> None:
+    BehaviorConfigPatch(engine={"smooth_frames": 8, "decay_idle": 0.9})  # ok
+    with pytest.raises(ValidationError, match="unknown engine knob"):
+        BehaviorConfigPatch(engine={"bogus": 1.0})
+    with pytest.raises(ValidationError, match=r"must be in \(0, 1\]"):
+        BehaviorConfigPatch(engine={"decay_idle": 1.5})
+    with pytest.raises(ValidationError, match="must be >= 0"):
+        BehaviorConfigPatch(engine={"smooth_frames": -1.0})
+
+
+def test_dimension_params_validation() -> None:
+    DimensionUpdate(params={"seconds": 45.0})  # ok
+    with pytest.raises(ValidationError, match="must be >= 0"):
+        DimensionUpdate(params={"offset_frac": -0.1})

@@ -218,6 +218,33 @@ SEQUENCE_META: list[dict[str, Any]] = [
 DEFAULT_THRESHOLDS: dict[str, float] = {"green_max": 10.0, "yellow_max": 25.0, "high_max": 50.0}
 _THRESHOLD_KEYS = {"green_max", "yellow_max", "high_max"}
 
+# Engine globals — MIRROR sentry-ai `behavior.DEFAULT_ENGINE`. Hot-tuned: the
+# config poller ships `engine` to the scorer's update_params(). Keep keys/defaults
+# in sync with sentry-ai or a knob silently no-ops.
+DEFAULT_ENGINE: dict[str, float] = {
+    "smooth_frames": 3.0,  # consecutive frames a noisy dim must hold before it scores
+    "decay_idle": 0.98,  # per-frame score decay when NOT holding an item
+    "decay_holding": 0.999,  # per-frame decay while holding (slower → score persists)
+    "sequence_window_sec": 60.0,  # window for an ordered pattern to complete
+    "loiter_radius_frac": 0.25,  # dwell radius as a fraction of person height
+    "stale_track_sec": 5.0,  # drop a per-track state unseen this long
+}
+_ENGINE_KEYS = set(DEFAULT_ENGINE)
+# Engine knobs that are 0-1 multipliers (validated to (0, 1]); the rest are >= 0.
+_ENGINE_UNIT_KEYS = {"decay_idle", "decay_holding"}
+
+# Per-detector sensitivity params — MIRROR sentry-ai `behavior.DEFAULT_DETECTOR_PARAMS`.
+# `*_frac` = fraction of person height; `cadence` = frame count; `seconds` = dwell time.
+DEFAULT_DETECTOR_PARAMS: dict[str, dict[str, float]] = {
+    "looking_around": {"offset_frac": 0.15},
+    "body_block": {"collapse_frac": 0.55, "ema_alpha": 0.1},
+    "crouch": {"frac": 0.15, "hold_floor": 5.0},
+    "wrist_to_torso": {"frac": 0.15, "cadence": 8.0},
+    "pocket_interaction": {"radius_frac": 0.12},
+    "rapid_movement": {"frac": 0.08},
+    "loitering": {"seconds": 30.0},
+}
+
 
 # === Schemas ===
 class BehaviorDimension(BaseModel):
@@ -235,6 +262,9 @@ class BehaviorDimension(BaseModel):
     has_detector: bool = True
     active_in_m1: bool
     builtin: bool
+    # Per-detector tuning params (sensitivity fracs / seconds / cadence). Empty
+    # for criteria with no tunable knobs (or custom criteria until a detector ships).
+    params: dict[str, float] = {}
 
 
 class SequenceInfo(BaseModel):
@@ -246,6 +276,8 @@ class SequenceInfo(BaseModel):
 class BehaviorConfig(BaseModel):
     dimensions: list[BehaviorDimension]
     thresholds: dict[str, float]
+    # Global engine knobs (smooth_frames, decay, sequence window, loiter radius…).
+    engine: dict[str, float] = {}
     sequences: list[SequenceInfo] = []
     color_labels: dict[str, str] = {
         "green": "Хэвийн",
@@ -261,10 +293,27 @@ class BehaviorConfig(BaseModel):
 
 
 class BehaviorConfigPatch(BaseModel):
-    """Back-compat bulk update — weights (existing keys only) and/or thresholds."""
+    """Bulk update — weights (existing keys only), thresholds, and/or engine knobs."""
 
     weights: dict[str, float] | None = None
     thresholds: dict[str, float] | None = None
+    engine: dict[str, float] | None = None
+
+    @field_validator("engine")
+    @classmethod
+    def check_engine(cls, v: dict[str, float] | None) -> dict[str, float] | None:
+        if v is None:
+            return None
+        unknown = set(v.keys()) - _ENGINE_KEYS
+        if unknown:
+            raise ValueError(f"unknown engine knob(s): {sorted(unknown)}")
+        for k, val in v.items():
+            if k in _ENGINE_UNIT_KEYS:
+                if not (0.0 < val <= 1.0):
+                    raise ValueError(f"{k} must be in (0, 1]")
+            elif val < 0:
+                raise ValueError(f"{k} must be >= 0")
+        return v
 
     @field_validator("weights")
     @classmethod
@@ -313,6 +362,19 @@ class DimensionUpdate(BaseModel):
     active: bool | None = None
     category: str | None = None
     level: int | None = Field(default=None, ge=1, le=4)
+    # Merge-patch of this criterion's tuning params (e.g. {"seconds": 45} or
+    # {"offset_frac": 0.22}). Only the supplied keys are updated; all must be >= 0.
+    params: dict[str, float] | None = None
+
+    @field_validator("params")
+    @classmethod
+    def check_params(cls, v: dict[str, float] | None) -> dict[str, float] | None:
+        if v is None:
+            return None
+        for k, val in v.items():
+            if val < 0:
+                raise ValueError(f"param {k} must be >= 0")
+        return v
 
 
 # === Catalog persistence ===
@@ -327,6 +389,9 @@ def _seed_one(m: dict[str, Any]) -> dict[str, Any]:
         "category": m["category"],
         "level": int(m["level"]),
         "has_detector": bool(m["has_detector"]),
+        # Per-detector tuning params (sensitivity / seconds / cadence); {} if the
+        # detector has no tunable knobs. Operator edits are preserved on reconcile.
+        "params": dict(DEFAULT_DETECTOR_PARAMS.get(m["key"], {})),
         "builtin": True,
     }
 
@@ -336,8 +401,8 @@ def _seed_dimensions() -> list[dict[str, Any]]:
 
 
 def _reconcile_v2(
-    dims: list[dict[str, Any]], thresholds: dict[str, float]
-) -> tuple[list[dict[str, Any]], dict[str, float], bool]:
+    dims: list[dict[str, Any]], thresholds: dict[str, float], engine: dict[str, float]
+) -> tuple[list[dict[str, Any]], dict[str, float], dict[str, float], bool]:
     """Upgrade an existing catalog to the v2 (ADR-0024) shape in place.
 
     Existing deployments hold a pre-v2 `app_config['behavior']` row (the 6 v1
@@ -350,7 +415,8 @@ def _reconcile_v2(
       defaults. Operator-added CUSTOM criteria are preserved. The operator's
       enable/disable toggle on pre-existing built-ins is preserved.
     - Already-v2 row: additive only — append any built-in keys meta gained since,
-      leave operator weight/active edits untouched.
+      backfill `params` on built-ins seeded before per-detector tuning shipped,
+      and fill any engine knob the row is missing. Operator edits untouched.
     """
     by_key = {d["key"]: d for d in dims}
     stored_builtins = [d for d in dims if d.get("builtin")]
@@ -366,7 +432,17 @@ def _reconcile_v2(
             if m["key"] not in by_key:
                 dims.append(_seed_one(m))
                 changed = True
-        return dims, thresholds, changed
+        # Additive: backfill per-detector params for built-ins seeded pre-tuning.
+        for d in dims:
+            if d.get("builtin") and "params" not in d:
+                d["params"] = dict(DEFAULT_DETECTOR_PARAMS.get(d["key"], {}))
+                changed = True
+        # Additive: fill any missing engine knob (operator values preserved).
+        for k, v in DEFAULT_ENGINE.items():
+            if k not in engine:
+                engine[k] = v
+                changed = True
+        return dims, thresholds, engine, changed
 
     # Pre-v2 → full upgrade. Preserve custom criteria + operator active toggles.
     custom = [d for d in dims if not d.get("builtin") and d["key"] not in BUILTIN_KEYS]
@@ -375,28 +451,43 @@ def _reconcile_v2(
         old = by_key.get(nb["key"])
         if old is not None and "active" in old:
             nb["active"] = bool(old["active"])
-    return new_builtins + custom, dict(DEFAULT_THRESHOLDS), True
+    return new_builtins + custom, dict(DEFAULT_THRESHOLDS), dict(DEFAULT_ENGINE), True
+
+
+def _store(
+    row: AppConfig,
+    dims: list[dict[str, Any]],
+    thresholds: dict[str, float],
+    engine: dict[str, float],
+) -> None:
+    """Persist the catalog back to the app_config row (reassign → SQLAlchemy dirty)."""
+    row.value = {"dimensions": dims, "thresholds": thresholds, "engine": engine}
 
 
 async def _load_catalog(
     db: AsyncSession,
-) -> tuple[AppConfig, list[dict[str, Any]], dict[str, float]]:
-    """Return (row, dimensions, thresholds). Seeds + migrates the DB row."""
+) -> tuple[AppConfig, list[dict[str, Any]], dict[str, float], dict[str, float]]:
+    """Return (row, dimensions, thresholds, engine). Seeds + migrates the DB row."""
     row = (
         await db.execute(select(AppConfig).where(AppConfig.key == BEHAVIOR_CONFIG_KEY))
     ).scalar_one_or_none()
     if row is None:
         row = AppConfig(
             key=BEHAVIOR_CONFIG_KEY,
-            value={"dimensions": _seed_dimensions(), "thresholds": dict(DEFAULT_THRESHOLDS)},
+            value={
+                "dimensions": _seed_dimensions(),
+                "thresholds": dict(DEFAULT_THRESHOLDS),
+                "engine": dict(DEFAULT_ENGINE),
+            },
         )
         db.add(row)
         await db.flush()
         value = dict(row.value)
-        return row, value["dimensions"], value["thresholds"]
+        return row, value["dimensions"], value["thresholds"], value["engine"]
 
     value = dict(row.value)
     thresholds = {**DEFAULT_THRESHOLDS, **value.get("thresholds", {})}
+    engine = {**DEFAULT_ENGINE, **value.get("engine", {})}
     dims = value.get("dimensions")
     if not dims:
         # Migrate the legacy {weights, thresholds} shape into a catalog.
@@ -406,18 +497,25 @@ async def _load_catalog(
             if d["key"] in old_weights:
                 d["weight"] = float(old_weights[d["key"]])
 
-    # Reconcile to the v2 catalog (adds new criteria/levels to existing rows).
-    dims, thresholds, changed = _reconcile_v2(dims, thresholds)
-    if changed or value.get("dimensions") != dims or value.get("thresholds") != thresholds:
-        row.value = {"dimensions": dims, "thresholds": thresholds}
+    # Reconcile to the v2 catalog (adds new criteria/levels/params to existing rows).
+    dims, thresholds, engine, changed = _reconcile_v2(dims, thresholds, engine)
+    if (
+        changed
+        or value.get("dimensions") != dims
+        or value.get("thresholds") != thresholds
+        or value.get("engine") != engine
+    ):
+        _store(row, dims, thresholds, engine)
         await db.flush()
-    return row, dims, thresholds
+    return row, dims, thresholds, engine
 
 
 _BUILTIN_BY_KEY = {m["key"]: m for m in BUILTIN_META}
 
 
-def _to_response(dims: list[dict[str, Any]], thresholds: dict[str, float]) -> BehaviorConfig:
+def _to_response(
+    dims: list[dict[str, Any]], thresholds: dict[str, float], engine: dict[str, float]
+) -> BehaviorConfig:
     out: list[BehaviorDimension] = []
     for d in dims:
         # Backfill v2 fields for rows seeded before ADR-0024 (built-ins from meta).
@@ -439,11 +537,17 @@ def _to_response(dims: list[dict[str, Any]], thresholds: dict[str, float]) -> Be
                 has_detector=bool(has_detector),
                 active_in_m1=bool(has_detector),
                 builtin=bool(d.get("builtin", False)),
+                params={
+                    k: float(v)
+                    for k, v in (d.get("params") or {}).items()
+                    if isinstance(v, (int, float)) and not isinstance(v, bool)
+                },
             )
         )
     return BehaviorConfig(
         dimensions=out,
         thresholds=thresholds,
+        engine={k: float(v) for k, v in engine.items()},
         sequences=[SequenceInfo(**s) for s in SEQUENCE_META],
     )
 
@@ -451,8 +555,8 @@ def _to_response(dims: list[dict[str, Any]], thresholds: dict[str, float]) -> Be
 # === Endpoints ===
 @router.get("", response_model=BehaviorConfig)
 async def get_behavior_config(db: Annotated[AsyncSession, Depends(get_db)]) -> BehaviorConfig:
-    _row, dims, thresholds = await _load_catalog(db)
-    return _to_response(dims, thresholds)
+    _row, dims, thresholds, engine = await _load_catalog(db)
+    return _to_response(dims, thresholds, engine)
 
 
 @router.patch("", response_model=BehaviorConfig)
@@ -461,8 +565,8 @@ async def patch_behavior_config(
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: Annotated[User, Depends(require_super_admin)],
 ) -> BehaviorConfig:
-    """Bulk weights (existing keys) + thresholds. Super-admin only."""
-    row, dims, thresholds = await _load_catalog(db)
+    """Bulk weights (existing keys) + thresholds + engine knobs. Super-admin only."""
+    row, dims, thresholds, engine = await _load_catalog(db)
     if body.weights:
         for d in dims:
             if d["key"] in body.weights:
@@ -475,8 +579,10 @@ async def patch_behavior_config(
                 detail="thresholds must satisfy green_max < yellow_max < high_max",
             )
         thresholds = new_t
-    row.value = {"dimensions": dims, "thresholds": thresholds}
-    return _to_response(dims, thresholds)
+    if body.engine:
+        engine = {**engine, **{k: float(v) for k, v in body.engine.items()}}
+    _store(row, dims, thresholds, engine)
+    return _to_response(dims, thresholds, engine)
 
 
 @router.post("/dimensions", response_model=BehaviorConfig, status_code=status.HTTP_201_CREATED)
@@ -485,7 +591,7 @@ async def add_dimension(
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: Annotated[User, Depends(require_super_admin)],
 ) -> BehaviorConfig:
-    row, dims, thresholds = await _load_catalog(db)
+    row, dims, thresholds, engine = await _load_catalog(db)
     if any(d["key"] == body.key for d in dims):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -500,13 +606,15 @@ async def add_dimension(
             "active": True,
             "category": body.category,
             "level": body.level,
-            # Custom criteria have no coded detector until one ships in sentry-ai.
+            # Custom criteria have no coded detector (or tunable params) until one
+            # ships in sentry-ai.
             "has_detector": False,
+            "params": {},
             "builtin": False,
         }
     )
-    row.value = {"dimensions": dims, "thresholds": thresholds}
-    return _to_response(dims, thresholds)
+    _store(row, dims, thresholds, engine)
+    return _to_response(dims, thresholds, engine)
 
 
 @router.patch("/dimensions/{key}", response_model=BehaviorConfig)
@@ -516,7 +624,7 @@ async def update_dimension(
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: Annotated[User, Depends(require_super_admin)],
 ) -> BehaviorConfig:
-    row, dims, thresholds = await _load_catalog(db)
+    row, dims, thresholds, engine = await _load_catalog(db)
     target = next((d for d in dims if d["key"] == key), None)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Criterion not found")
@@ -532,8 +640,12 @@ async def update_dimension(
         target["category"] = body.category
     if body.level is not None:
         target["level"] = body.level
-    row.value = {"dimensions": dims, "thresholds": thresholds}
-    return _to_response(dims, thresholds)
+    if body.params is not None:
+        merged = dict(target.get("params") or {})
+        merged.update({k: float(v) for k, v in body.params.items()})
+        target["params"] = merged
+    _store(row, dims, thresholds, engine)
+    return _to_response(dims, thresholds, engine)
 
 
 @router.delete("/dimensions/{key}", response_model=BehaviorConfig)
@@ -542,7 +654,7 @@ async def delete_dimension(
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: Annotated[User, Depends(require_super_admin)],
 ) -> BehaviorConfig:
-    row, dims, thresholds = await _load_catalog(db)
+    row, dims, thresholds, engine = await _load_catalog(db)
     target = next((d for d in dims if d["key"] == key), None)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Criterion not found")
@@ -552,5 +664,5 @@ async def delete_dimension(
             detail="Built-in criteria can't be deleted (disable it instead)",
         )
     dims = [d for d in dims if d["key"] != key]
-    row.value = {"dimensions": dims, "thresholds": thresholds}
-    return _to_response(dims, thresholds)
+    _store(row, dims, thresholds, engine)
+    return _to_response(dims, thresholds, engine)
