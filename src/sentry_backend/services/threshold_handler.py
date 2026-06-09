@@ -87,8 +87,14 @@ class ThresholdHandler:
 
     async def _on_frame_inner(self, frame: dict[str, Any]) -> None:
         settings = get_settings()
-        if not settings.mediamtx_recordings_dir:
-            return  # L5 disabled
+        # L5 enable-gate. The breach clip is cut + VLM-verified ON THE AI NODE
+        # (POST {sentry_ai_url}/v1/cut-verify — see _handle_breach_inner), because
+        # in the split/Railway topology the backend can't read the node's MediaMTX
+        # recordings. So L5 is available whenever the AI node is configured — NOT
+        # when a local recordings dir exists (that gated the obsolete local-cut
+        # path and wrongly disabled L5 on Railway, where alerts never fired).
+        if not settings.sentry_ai_url:
+            return  # no AI node to cut/verify the breach → L5 disabled
 
         cam_path = frame.get("camera_id")
         if not isinstance(cam_path, str):
