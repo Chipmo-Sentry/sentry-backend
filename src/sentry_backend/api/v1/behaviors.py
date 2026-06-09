@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from sentry_backend.db.models.app_config import AppConfig
 from sentry_backend.db.models.user import User
@@ -460,8 +461,16 @@ def _store(
     thresholds: dict[str, float],
     engine: dict[str, float],
 ) -> None:
-    """Persist the catalog back to the app_config row (reassign → SQLAlchemy dirty)."""
+    """Persist the catalog back to the app_config row.
+
+    `value` is a plain JSONB column (not MutableDict). The loaded dims are shared
+    by reference, so in-place edits (e.g. `target["active"] = ...`) also mutate
+    SQLAlchemy's change-detection baseline — making the reassignment below look
+    like a no-op (`new == old`) so NO UPDATE is emitted and the change is silently
+    lost. `flag_modified` forces the column dirty so the write always persists.
+    """
     row.value = {"dimensions": dims, "thresholds": thresholds, "engine": engine}
+    flag_modified(row, "value")
 
 
 async def _load_catalog(
