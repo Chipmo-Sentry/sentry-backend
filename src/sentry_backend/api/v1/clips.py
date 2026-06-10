@@ -40,7 +40,7 @@ async def upload_clip(
     if not await camera_repo.store_belongs_to_org(db, store_id, org_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Store not found or not in your organization",
+            detail="Дэлгүүр олдсонгүй эсвэл таны байгууллагынх биш байна.",
         )
 
     # Validate camera (if specified) belongs to the store
@@ -49,7 +49,7 @@ async def upload_clip(
         if cam is None or cam.store_id != store_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Camera not found or not in specified store",
+                detail="Камер олдсонгүй эсвэл заасан дэлгүүрт хамаарахгүй байна.",
             )
 
     try:
@@ -57,7 +57,7 @@ async def upload_clip(
     except ClipTooLargeError as e:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Clip exceeds max size",
+            detail="Клипийн хэмжээ хэтэрсэн байна.",
         ) from e
 
     # Dedup by sha256 within org
@@ -109,7 +109,7 @@ async def get_clip(
 ) -> ClipPublic:
     clip = await clip_repo.get_clip_for_org(db, clip_id, org_id)
     if clip is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Клип олдсонгүй.")
     return ClipPublic.model_validate(clip)
 
 
@@ -121,7 +121,7 @@ async def download_clip(
 ) -> FileResponse:
     clip = await clip_repo.get_clip_for_org(db, clip_id, org_id)
     if clip is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Клип олдсонгүй.")
     return FileResponse(
         path=clip.storage_path,
         media_type="video/mp4",

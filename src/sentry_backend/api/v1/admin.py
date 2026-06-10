@@ -185,7 +185,7 @@ async def create_org(
     if await org_repo.get_org_by_slug(db, body.slug) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Slug '{body.slug}' is already taken",
+            detail=f"'{body.slug}' богино нэр аль хэдийн ашиглагдсан байна.",
         )
     org = await org_repo.create_org(db, name=body.name, slug=body.slug)
     return OrganizationPublic.model_validate(org)
@@ -201,7 +201,7 @@ async def get_org(
     if org is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found",
+            detail="Байгууллага олдсонгүй.",
         )
     return OrganizationPublic.model_validate(org)
 
@@ -215,7 +215,7 @@ async def list_org_members(
     if await org_repo.get_org(db, org_id) is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found",
+            detail="Байгууллага олдсонгүй.",
         )
     members = await org_repo.list_members(db, org_id)
     return [
@@ -246,7 +246,7 @@ async def invite_user(
     if await user_repo.get_user_by_email(db, body.email) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
+            detail="Энэ имэйл аль хэдийн бүртгэгдсэн байна.",
         )
 
     # Verify org exists
@@ -254,7 +254,7 @@ async def invite_user(
     if org is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found",
+            detail="Байгууллага олдсонгүй.",
         )
 
     user = await user_repo.create_user(
@@ -275,7 +275,7 @@ async def invite_user(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User already a member of this organization",
+            detail="Хэрэглэгч энэ байгууллагын гишүүн аль хэдийн болсон байна.",
         ) from None
 
     return UserPublic.model_validate(user)
@@ -291,14 +291,14 @@ async def update_user(
     if would_self_lockout(actor_id=str(actor.id), target_id=str(user_id), update=body):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot revoke your own super-admin access",
+            detail="Та өөрийнхөө super-admin эрхийг хасч болохгүй.",
         )
 
     user = await user_repo.get_user_by_id(db, user_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
+            detail="Хэрэглэгч олдсонгүй.",
         )
 
     user = await user_repo.update_user_flags(
@@ -330,7 +330,7 @@ async def update_lead(
 ) -> LeadPublic:
     lead = await lead_repo.get_lead(db, lead_id)
     if lead is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Хүсэлт олдсонгүй.")
     lead = await lead_repo.update_lead(db, lead, status=body.status, notes=body.notes)
     return LeadPublic.model_validate(lead)
 
@@ -396,7 +396,7 @@ async def revoke_ai_node(
 ) -> None:
     node = await ai_node_repo.get_node(db, node_id)
     if node is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI node not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI зангилаа олдсонгүй.")
     await ai_node_repo.deactivate_node(db, node)
 
 
@@ -409,7 +409,7 @@ async def update_ai_node(
 ) -> AiNodePublic:
     node = await ai_node_repo.get_node(db, node_id)
     if node is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI node not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI зангилаа олдсонгүй.")
     node = await ai_node_repo.update_node(
         db,
         node,

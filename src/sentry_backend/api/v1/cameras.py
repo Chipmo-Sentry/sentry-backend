@@ -56,7 +56,7 @@ async def create_camera(
     if cam is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Store not found or not in your organization",
+            detail="Дэлгүүр олдсонгүй эсвэл таны байгууллагынх биш байна.",
         )
     # Commit before MediaMTX sync so the path exists in DB even if MediaMTX
     # is unreachable (operator can restart MediaMTX to pick up later).
@@ -76,7 +76,7 @@ async def get_camera(
 ) -> CameraPublic:
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")
     return CameraPublic.from_orm_camera(cam)
 
 
@@ -93,10 +93,11 @@ async def get_stream_token(
     """
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")
     if not cam.mediamtx_path:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Camera has no live stream path"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Энэ камерт шууд дамжуулалтын зам тохируулаагүй байна.",
         )
     return StreamTokenResponse(
         token=create_stream_token(cam.mediamtx_path),
@@ -113,7 +114,7 @@ async def update_camera(
 ) -> CameraPublic:
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")
     old_path = cam.mediamtx_path
     cam = await camera_repo.update_camera(
         db,
@@ -149,7 +150,7 @@ async def delete_camera(
 ) -> None:
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")
     path = cam.mediamtx_path
     await camera_repo.delete_camera(db, cam)
     await db.commit()

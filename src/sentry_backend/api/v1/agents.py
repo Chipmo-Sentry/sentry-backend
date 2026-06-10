@@ -44,7 +44,7 @@ async def _require_store_admin(db: AsyncSession, user: User, store_id: UUID) -> 
     admin of the store's org). Raises 404 / 403 otherwise."""
     store = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
     if store is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
     if user.is_super_admin:
         return store
     role = (
@@ -58,7 +58,7 @@ async def _require_store_admin(db: AsyncSession, user: User, store_id: UUID) -> 
     if role not in _ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin or owner role required for this store",
+            detail="Энэ дэлгүүрт admin эсвэл эзэн (owner) эрх шаардлагатай.",
         )
     return store
 
@@ -103,7 +103,9 @@ async def revoke_agent(
 ) -> None:
     agent = await agent_repo.get_agent(db, agent_id)
     if agent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Холбогдсон компьютер олдсонгүй."
+        )
     await _require_store_admin(db, user, agent.store_id)
     await agent_repo.delete_agent(db, agent)
 
@@ -120,13 +122,13 @@ async def pair_agent(
     if pairing is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired pairing code",
+            detail="Холболтын код буруу эсвэл хугацаа нь дууссан байна.",
         )
     store = (
         await db.execute(select(Store).where(Store.id == pairing.store_id))
     ).scalar_one_or_none()
     if store is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store no longer exists")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр устсан байна.")
     # Re-pairing the SAME computer (matched by hostname within the store) reuses
     # its existing row instead of spawning a duplicate "connected computer" —
     # the agent already sends name=hostname. New token is issued below either way.
@@ -187,7 +189,7 @@ async def agent_register_camera(
         # Store vanished or got reassigned out of the agent's org.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Agent's store is no longer valid",
+            detail="Энэ компьютерт холбогдсон дэлгүүр хүчингүй болсон байна.",
         )
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()
@@ -206,7 +208,7 @@ async def agent_delete_camera(
 ) -> None:
     cam = await camera_repo.get_camera_for_org(db, camera_id, agent.organization_id)
     if cam is None or cam.store_id != agent.store_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")
     path = cam.mediamtx_path
     await camera_repo.delete_camera(db, cam)
     await agent_repo.touch_last_seen(db, agent)

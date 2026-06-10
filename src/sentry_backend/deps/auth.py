@@ -13,7 +13,7 @@ from sentry_backend.security import decode_user_token
 
 CREDENTIALS_EXCEPTION = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Not authenticated",
+    detail="Нэвтрэх шаардлагатай. Дахин нэвтэрнэ үү.",
     headers={"WWW-Authenticate": "Bearer"},
 )
 
@@ -60,6 +60,6 @@ async def require_super_admin(
     if not user.is_super_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Super-admin only",
+            detail="Зөвхөн super-admin эрхтэй.",
         )
     return user

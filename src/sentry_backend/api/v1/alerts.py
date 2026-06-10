@@ -89,5 +89,5 @@ async def get_alert(
 ) -> AlertPublic:
     alert = await alert_repo.get_alert_for_org(db, alert_id, org_id)
     if alert is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сэрэмжлүүлэг олдсонгүй.")
     return AlertPublic.model_validate(alert)

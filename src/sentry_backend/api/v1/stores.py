@@ -51,7 +51,7 @@ async def get_store(
 ) -> StorePublic:
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
     return StorePublic.model_validate(store)
 
 
@@ -64,7 +64,7 @@ async def update_store(
 ) -> StorePublic:
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
     store = await store_repo.update_store(
         db,
         store,
@@ -84,5 +84,5 @@ async def delete_store(
 ) -> None:
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
     await store_repo.delete_store(db, store)

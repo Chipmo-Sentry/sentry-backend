@@ -37,7 +37,7 @@ async def get_current_organization_id(
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid X-Org-Id header (must be UUID)",
+                detail="X-Org-Id толгой буруу байна (UUID байх ёстой).",
             ) from e
 
     if user.is_super_admin and requested_org is not None:
@@ -51,14 +51,14 @@ async def get_current_organization_id(
     if not memberships:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not a member of any organization",
+            detail="Та ямар ч байгууллагын гишүүн биш байна.",
         )
 
     if requested_org is not None:
         if requested_org not in memberships:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not a member of requested organization",
+                detail="Та сонгосон байгууллагын гишүүн биш байна.",
             )
         return requested_org
 
@@ -67,7 +67,7 @@ async def get_current_organization_id(
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Multiple memberships — set X-Org-Id header",
+        detail="Олон байгууллагад харьяалагдаж байна — X-Org-Id толгойг тохируулна уу.",
     )
 
 
@@ -95,6 +95,6 @@ async def get_current_organization_id_admin(
     if role not in _ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Requires owner or admin role",
+            detail="Эзэн (owner) эсвэл admin эрх шаардлагатай.",
         )
     return org_id

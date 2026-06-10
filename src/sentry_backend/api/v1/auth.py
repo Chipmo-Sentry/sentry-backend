@@ -38,7 +38,7 @@ async def login(
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
+            detail="Имэйл эсвэл нууц үг буруу байна.",
         )
     tokens = issue_tokens(user.id)
     set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
@@ -58,26 +58,26 @@ async def refresh(
     if not sentry_refresh:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No refresh token",
+            detail="Нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.",
         )
     try:
         payload = decode_user_token(sentry_refresh)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token",
+            detail="Нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.",
         ) from e
     if payload.get("typ") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Wrong token type",
+            detail="Нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.",
         )
     try:
         user_id = UUID(payload["sub"])
     except (KeyError, ValueError) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token subject",
+            detail="Нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.",
         ) from e
 
     tokens = issue_tokens(user_id)

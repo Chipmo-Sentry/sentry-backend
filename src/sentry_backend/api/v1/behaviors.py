@@ -585,7 +585,7 @@ async def patch_behavior_config(
         if not (new_t["green_max"] < new_t["yellow_max"] < new_t.get("high_max", float("inf"))):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="thresholds must satisfy green_max < yellow_max < high_max",
+                detail="Босго утга green_max < yellow_max < high_max нөхцөлийг хангах ёстой.",
             )
         thresholds = new_t
     if body.engine:
@@ -604,7 +604,7 @@ async def add_dimension(
     if any(d["key"] == body.key for d in dims):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Criterion '{body.key}' already exists",
+            detail=f"'{body.key}' шалгуур аль хэдийн байна.",
         )
     dims.append(
         {
@@ -636,7 +636,7 @@ async def update_dimension(
     row, dims, thresholds, engine = await _load_catalog(db)
     target = next((d for d in dims if d["key"] == key), None)
     if target is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Criterion not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Шалгуур олдсонгүй.")
     if body.label_mn is not None:
         target["label_mn"] = body.label_mn
     if body.description_mn is not None:
@@ -666,11 +666,11 @@ async def delete_dimension(
     row, dims, thresholds, engine = await _load_catalog(db)
     target = next((d for d in dims if d["key"] == key), None)
     if target is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Criterion not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Шалгуур олдсонгүй.")
     if target.get("builtin"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Built-in criteria can't be deleted (disable it instead)",
+            detail="Үндсэн шалгуурыг устгах боломжгүй (идэвхгүй болгоно уу).",
         )
     dims = [d for d in dims if d["key"] != key]
     _store(row, dims, thresholds, engine)
