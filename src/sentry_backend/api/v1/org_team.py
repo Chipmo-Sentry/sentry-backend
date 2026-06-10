@@ -200,9 +200,7 @@ async def update_member(
             detail="Байгууллагын эзнийг (owner) түгжиж болохгүй.",
         )
     user = await user_repo.update_user_flags(db, target[0], is_active=body.is_active)
-    log.info(
-        "org.member_access", org_id=str(org_id), user_id=str(user_id), active=body.is_active
-    )
+    log.info("org.member_access", org_id=str(org_id), user_id=str(user_id), active=body.is_active)
     return OrgMemberPublic(user=UserPublic.model_validate(user), role=target[1])
 
 
