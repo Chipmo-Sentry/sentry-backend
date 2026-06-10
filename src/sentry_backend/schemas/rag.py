@@ -11,7 +11,7 @@ class RagCaseCreate(BaseModel):
     store_id: UUID | None = None
     verdict: str = Field(max_length=32)
     category: str | None = Field(default=None, max_length=32)
-    description: str = Field(min_length=1)
+    description: str = Field(min_length=1, max_length=8000)
     embedding: list[float] = Field(min_length=1, max_length=4096)
 
 

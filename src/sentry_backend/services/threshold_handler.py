@@ -271,7 +271,40 @@ class ThresholdHandler:
             return
 
         # 2. Persist the returned clip on the backend, then insert the Clip row.
-        clip_bytes = base64.b64decode(data["clip_b64"])
+        max_bytes = settings.max_clip_size_mb * 1024 * 1024
+        clip_b64 = str(data["clip_b64"])
+        # Reject before decode: base64 inflates ~4/3, so a string longer than
+        # ceil(max_bytes/3)*4 cannot decode under the cap — cheap guard against a
+        # rogue/compromised AI node spilling unbounded bytes onto disk.
+        if len(clip_b64) > ((max_bytes + 2) // 3) * 4:
+            log.error(
+                "threshold_handler.clip_too_large",
+                camera_path=cam_path,
+                person_id=person_id,
+                b64_len=len(clip_b64),
+                max_bytes=max_bytes,
+            )
+            return
+        clip_bytes = base64.b64decode(clip_b64)
+        if len(clip_bytes) > max_bytes:
+            log.error(
+                "threshold_handler.clip_too_large",
+                camera_path=cam_path,
+                person_id=person_id,
+                decoded_bytes=len(clip_bytes),
+                max_bytes=max_bytes,
+            )
+            return
+        declared_size = int(data["file_size_bytes"])
+        if len(clip_bytes) != declared_size:
+            log.error(
+                "threshold_handler.clip_size_mismatch",
+                camera_path=cam_path,
+                person_id=person_id,
+                decoded_bytes=len(clip_bytes),
+                declared_bytes=declared_size,
+            )
+            return
         out_dir = Path(settings.clip_storage_dir).resolve()  # noqa: ASYNC240
         out_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
         out_path = out_dir / f"live_{uuid4().hex}.mp4"
@@ -298,7 +331,7 @@ class ThresholdHandler:
                 captured_at=captured_at,
                 duration_sec=float(data["duration_sec_clip"]),
                 storage_path=out_path.as_posix(),
-                file_size_bytes=int(data["file_size_bytes"]),
+                file_size_bytes=declared_size,
                 sha256=sha_hex,
             )
             db.add(clip)

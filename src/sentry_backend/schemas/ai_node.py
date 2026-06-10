@@ -40,7 +40,7 @@ class AiNodeHeartbeat(BaseModel):
     """Telemetry the node reports every ~60s."""
 
     fps_inference: float | None = None
-    vram_mb: int | None = None  # legacy alias; prefer vram_used_mb below
+    vram_mb: int | None = Field(default=None, ge=0)  # legacy alias; prefer vram_used_mb below
     active_cameras: int | None = None
     version: str | None = Field(default=None, max_length=64)
     # Per-dependency health the node probes locally (e.g. {"ollama": true,
@@ -49,19 +49,19 @@ class AiNodeHeartbeat(BaseModel):
     health: dict[str, bool] | None = None
     # Resource load for the observability dashboard (docs/19). GPU fields are
     # None on a CPU-only node.
-    cpu_pct: float | None = None
-    ram_used_mb: int | None = None
-    ram_total_mb: int | None = None
-    gpu_pct: int | None = None
-    vram_used_mb: int | None = None
-    vram_total_mb: int | None = None
+    cpu_pct: float | None = Field(default=None, ge=0, le=100)
+    ram_used_mb: int | None = Field(default=None, ge=0)
+    ram_total_mb: int | None = Field(default=None, ge=0)
+    gpu_pct: int | None = Field(default=None, ge=0, le=100)
+    vram_used_mb: int | None = Field(default=None, ge=0)
+    vram_total_mb: int | None = Field(default=None, ge=0)
     gpu_temp_c: int | None = None
     # Sentry-project-only (process-scoped) usage — the project's own footprint,
     # vs the whole-machine fields above. No sentry_gpu_pct (NVML utilisation is
     # device-wide only; only VRAM is per-process).
-    sentry_cpu_pct: float | None = None
-    sentry_ram_mb: int | None = None
-    sentry_vram_mb: int | None = None
+    sentry_cpu_pct: float | None = Field(default=None, ge=0, le=100)
+    sentry_ram_mb: int | None = Field(default=None, ge=0)
+    sentry_vram_mb: int | None = Field(default=None, ge=0)
 
 
 class AiNodePairingCodePublic(BaseModel):

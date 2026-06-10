@@ -146,6 +146,15 @@ class Settings(BaseSettings):
     login_rate_limit: str = "10/minute"
     pair_rate_limit: str = "10/minute"
 
+    # Number of trusted reverse proxies in front of the backend. The rate-limit
+    # key takes the X-Forwarded-For entry this many hops from the RIGHT — the IP
+    # our own trusted proxy observed and appended, which an external client
+    # cannot forge. Railway's edge is a single hop, so 1. Set to 0 when the app
+    # is exposed directly with no proxy (then the socket peer is used and XFF is
+    # ignored entirely). Raising this above the real proxy count re-opens the
+    # forgery hole, so keep it equal to the actual topology. See ratelimit.py.
+    trusted_proxy_hops: int = 1
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @field_validator("allowed_origins", mode="before")

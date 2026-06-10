@@ -15,22 +15,34 @@ from sentry_backend.settings import get_settings
 log = get_logger("sentry_backend.lead_notify")
 
 
+def _esc(value: str) -> str:
+    """Escape Telegram legacy-Markdown special chars in untrusted lead fields.
+
+    Without this a lead could submit ``*``, ``_``, backtick or ``[`` to break
+    or spoof the founder's message (parse_mode="Markdown" below). The legacy
+    Markdown parser only treats these four characters as markup.
+    """
+    for ch in ("_", "*", "`", "["):
+        value = value.replace(ch, f"\\{ch}")
+    return value
+
+
 def _format(lead: Lead) -> str:
     lines = [
         "🟠 *Шинэ demo хүсэлт — Chipmo Sentry*",
-        f"✉️ {lead.email}",
+        f"✉️ {_esc(lead.email)}",
     ]
     if lead.name:
-        lines.append(f"👤 {lead.name}")
+        lines.append(f"👤 {_esc(lead.name)}")
     if lead.organization:
-        lines.append(f"🏢 {lead.organization}")
+        lines.append(f"🏢 {_esc(lead.organization)}")
     if lead.phone:
-        lines.append(f"📞 {lead.phone}")
+        lines.append(f"📞 {_esc(lead.phone)}")
     if lead.industry:
-        lines.append(f"🏷 {lead.industry}")
+        lines.append(f"🏷 {_esc(lead.industry)}")
     if lead.camera_count:
         lines.append(f"📹 {lead.camera_count} камер")
-    lines.append(f"🌐 {lead.source}")
+    lines.append(f"🌐 {_esc(lead.source)}")
     return "\n".join(lines)
 
 
