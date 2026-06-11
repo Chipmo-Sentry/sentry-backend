@@ -51,6 +51,13 @@ async def get_current_user(
     user = await get_user_by_id(db, user_id)
     if user is None or not user.is_active:
         raise CREDENTIALS_EXCEPTION
+
+    # Server-side revocation: the token's tv claim must match the user's current
+    # token_version. A logout / password change bumps token_version, which
+    # invalidates every token minted before it (no extra DB hit — the user row
+    # is already loaded). Tokens predating this feature carry no tv → treat as 0.
+    if payload.get("tv", 0) != user.token_version:
+        raise CREDENTIALS_EXCEPTION
     return user
 
 

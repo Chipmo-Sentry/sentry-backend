@@ -3,6 +3,7 @@
 import hmac
 from typing import Annotated, Literal
 from urllib.parse import parse_qs
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
-from sentry_backend.repository import alert_repo, rag_case_repo
+from sentry_backend.repository import ai_node_repo, alert_repo, rag_case_repo
 from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic
 from sentry_backend.schemas.rag import RagCaseCreate, RagCaseMatch, RagSimilarRequest
 from sentry_backend.security import decode_user_token
@@ -22,6 +23,12 @@ from sentry_backend.services.threshold_handler import get_threshold_handler
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/internal", tags=["internal"])
+
+_INTERNAL_TOKEN_EXCEPTION = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Invalid or revoked internal credentials",
+    headers={"WWW-Authenticate": "Bearer"},
+)
 
 
 class MediaMtxAuthRequest(BaseModel):
@@ -185,15 +192,15 @@ class LiveMetadataBatch(BaseModel):
 
 
 async def _require_simple_internal_token(
+    db: Annotated[AsyncSession, Depends(get_db)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> None:
     """Simpler shared-secret auth for high-volume live metadata.
 
     sentry-ai sends `Authorization: Bearer <token>`. We accept any of:
       - A bearer token matching `live_metadata_shared_secret` (env), OR
-      - A paired node's ai_node JWT (typ=ai_node) — signature + exp only, no
-        per-batch DB hit on this high-volume path (revocation is enforced on the
-        management endpoints), OR
+      - A paired node's ai_node JWT (typ=ai_node) — signature + exp AND a single
+        node lookup to confirm the node is still active (revoke-aware), OR
       - A valid full service JWT (delegates to require_service_token).
     """
     settings = get_settings()
@@ -202,12 +209,23 @@ async def _require_simple_internal_token(
         expected = settings.live_metadata_shared_secret
         if expected and hmac.compare_digest(token, expected):
             return
-        # Paired AI node token (signature-validated; cheap, no DB).
+        # Paired AI node token: signature-validated, then a single node lookup
+        # so a revoked (is_active=False) node's still-valid-by-exp JWT is
+        # rejected. One indexed PK query per batch is acceptable on this path
+        # (batches carry up to 200 frames, so the lookup amortizes well).
         try:
-            if decode_user_token(token).get("typ") == "ai_node":
-                return
+            payload = decode_user_token(token)
         except ValueError:
-            pass
+            payload = None
+        if payload is not None and payload.get("typ") == "ai_node":
+            try:
+                node_id = UUID(payload["sub"])
+            except (KeyError, ValueError):
+                raise _INTERNAL_TOKEN_EXCEPTION from None
+            node = await ai_node_repo.get_node(db, node_id)
+            if node is None or not node.is_active:
+                raise _INTERNAL_TOKEN_EXCEPTION
+            return
     # Fall back to JWT path
     await require_service_token(authorization)
 

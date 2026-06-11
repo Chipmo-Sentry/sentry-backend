@@ -27,8 +27,11 @@ async def authenticate(db: AsyncSession, email: str, password: str) -> User | No
     return user
 
 
-def issue_tokens(user_id: UUID) -> TokenPair:
+def issue_tokens(user_id: UUID, token_version: int = 0) -> TokenPair:
+    """Mint an access+refresh pair, baking the user's current ``token_version``
+    into both as the ``tv`` claim. A later bump of ``User.token_version``
+    (logout / password change) invalidates every token issued before it."""
     return TokenPair(
-        access_token=create_user_token(user_id, "access"),
-        refresh_token=create_user_token(user_id, "refresh"),
+        access_token=create_user_token(user_id, "access", token_version=token_version),
+        refresh_token=create_user_token(user_id, "refresh", token_version=token_version),
     )

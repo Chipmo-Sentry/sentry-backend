@@ -37,6 +37,8 @@ def create_user_token(
     user_id: UUID,
     token_type: TokenType,
     extra_claims: dict[str, Any] | None = None,
+    *,
+    token_version: int = 0,
 ) -> str:
     settings = get_settings()
     now = _now_utc()
@@ -52,6 +54,9 @@ def create_user_token(
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
         "typ": token_type,
+        # Server-side revocation handle: must match User.token_version at
+        # request time, otherwise the token is rejected (see deps/auth.py).
+        "tv": token_version,
     }
     if extra_claims:
         payload.update(extra_claims)
