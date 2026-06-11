@@ -24,7 +24,7 @@ import base64
 import contextlib
 import hashlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,7 @@ from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import alert_repo
 from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.services import alert_notify
+from sentry_backend.services.ai_service import build_live_rag_query
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.settings import get_settings
@@ -63,6 +64,9 @@ class _PersonState:
     above_threshold_since: float | None = None  # monotonic ts when we first crossed
     last_breach_ts: float = 0.0  # cooldown anchor
     last_seen: float = 0.0  # monotonic ts of last frame
+    # Latest non-empty behavior-engine sequence rule keys for this track —
+    # carried into the breach so the RAG query (T08) can describe the event.
+    last_sequences: list[str] = field(default_factory=list)
 
 
 class ThresholdHandler:
@@ -128,6 +132,10 @@ class ThresholdHandler:
                 st.risk_pct = float(risk)
                 st.peak_risk_pct = max(st.peak_risk_pct, st.risk_pct)
                 st.last_seen = now
+                # Remember the latest fired sequence rules (RAG query context).
+                seqs = t.get("sequences")
+                if isinstance(seqs, list) and seqs:
+                    st.last_sequences = [str(s) for s in seqs]
 
                 # Cooldown still active → don't fire
                 if now - st.last_breach_ts < settings.live_breach_cooldown_sec:
@@ -145,11 +153,12 @@ class ThresholdHandler:
                     ):
                         # Confirmed sustained breach
                         peak = st.peak_risk_pct
+                        sequences = list(st.last_sequences)
                         st.last_breach_ts = now
                         st.above_threshold_since = None
                         st.peak_risk_pct = 0.0
                         self._inflight.add(key)
-                        asyncio.create_task(self._handle_breach(camera, pid, peak, key))
+                        asyncio.create_task(self._handle_breach(camera, pid, peak, key, sequences))
                 else:
                     st.above_threshold_since = None
 
@@ -176,9 +185,10 @@ class ThresholdHandler:
         person_id: int,
         peak_risk_pct: float,
         key: tuple[str, int],
+        sequences: list[str] | None = None,
     ) -> None:
         try:
-            await self._handle_breach_inner(camera, person_id, peak_risk_pct)
+            await self._handle_breach_inner(camera, person_id, peak_risk_pct, sequences)
         except Exception:  # noqa: BLE001
             log.exception(
                 "threshold_handler.breach_failed",
@@ -190,7 +200,11 @@ class ThresholdHandler:
                 self._inflight.discard(key)
 
     async def _handle_breach_inner(
-        self, camera: Camera, person_id: int, peak_risk_pct: float
+        self,
+        camera: Camera,
+        person_id: int,
+        peak_risk_pct: float,
+        sequences: list[str] | None = None,
     ) -> None:
         settings = get_settings()
         cam_path = camera.mediamtx_path
@@ -222,6 +236,10 @@ class ThresholdHandler:
                         "camera_id": str(camera.id),
                         "person_id": person_id,
                         "peak_risk_pct": peak_risk_pct,
+                        # RAG (T08): Mongolian event description in the same
+                        # register as verified_case descriptions (VLM reasoning)
+                        # so the node retrieves this store's similar past cases.
+                        "rag_query": build_live_rag_query(peak_risk_pct, sequences),
                     },
                 )
         except httpx.HTTPError as e:

@@ -37,6 +37,63 @@ from sentry_backend.settings import get_settings
 log = get_logger("sentry_backend.ai_service")
 
 
+# === RAG query builders (docs/19 Phase 4, T08) ===
+#
+# verified_case rows are created from staff feedback on alerts, and their
+# `description` + embedding come from the VLM's `reasoning` field — short
+# MONGOLIAN sentences describing a suspected concealment event (see
+# prompts/verify_v1.j2 in sentry-ai and feedback.py here). For cosine
+# similarity over those embeddings to rank meaningfully, the retrieval query
+# must be the same kind of text: short Mongolian sentences describing what we
+# suspect is happening — NOT raw rule keys or English labels.
+
+# Behavior-engine sequence rule keys (sentry-ai live_worker/behavior.py) →
+# Mongolian phrases in the same register as the VLM reasoning sentences.
+_SEQUENCE_MN: dict[str, str] = {
+    "item_pickup": "бараа авсан",
+    "wrist_to_torso": "бугуйгаа цээж, бие рүүгээ ойртуулсан",
+    "bag_interaction": "цүнх, уут руу гар хийсэн",
+    "pocket_interaction": "халаас орчимд гараа хүргэсэн",
+    "loitering": "тавиурын дэргэд удаан эргэлдсэн",
+    "concealment": "бараа нуун далдалсан",
+    "seq_pickup_bag": "бараа аваад цүнхэнд хийсэн",
+    "seq_pickup_wrist_bag": "бараа аваад бие рүүгээ ойртуулж цүнхэнд нуусан",
+    "seq_loiter_pickup_conceal": "удаан эргэлдэж байгаад бараа авч нуусан",
+    "concealment_sequence": "бараа авч халаас, цүнхэндээ нуусан бүрэн дараалал",
+}
+
+# sentry-ai VerifyRequest.rag_query has max_length=2000.
+_RAG_QUERY_MAX_LEN = 2000
+
+
+def build_upload_rag_query() -> str:
+    """Query for the manual-upload verify path.
+
+    No behavior-engine context exists yet (the clip was just uploaded), so the
+    query describes the generic suspected event — concealment in a retail store
+    — which surfaces this store's most relevant past staff-verified cases.
+    """
+    return (
+        "Дэлгүүрийн хяналтын бичлэг: хүн бараа авч халаас, цүнх эсвэл "
+        "хувцасныхаа доор нуусан байж болзошгүй сэжигтэй үйлдэл."
+    )
+
+
+def build_live_rag_query(peak_risk_pct: float, sequences: list[str] | None = None) -> str:
+    """Query for the live-threshold (cut-verify) path.
+
+    Folds the behavior engine's fired sequence rules into Mongolian phrases so
+    the query text matches the language of the stored case descriptions.
+    """
+    parts = [
+        f"Амьд хяналт: хүн бараа авч нуусан байж болзошгүй (эрсдэлийн оноо {peak_risk_pct:.0f}%)."
+    ]
+    phrases = [_SEQUENCE_MN[s] for s in (sequences or []) if s in _SEQUENCE_MN]
+    if phrases:
+        parts.append("Илэрсэн үйлдлүүд: " + "; ".join(dict.fromkeys(phrases)) + ".")
+    return " ".join(parts)[:_RAG_QUERY_MAX_LEN]
+
+
 async def verify_clip_with_ai(clip_id: UUID) -> None:
     """Background task — never raises; logs failures.
 
@@ -79,6 +136,9 @@ async def _verify_inner(clip_id: UUID, ai_base_url: str, timeout_sec: int) -> No
         "clip_path": storage_path,
         "store_id": clip_payload["store_id"],
         "camera_id": clip_payload["camera_id"],
+        # RAG (T08): describe the suspected event so the AI node retrieves this
+        # store's similar staff-verified cases as few-shot context for the VLM.
+        "rag_query": build_upload_rag_query(),
     }
     log.info("calling sentry-ai", clip_id=str(clip_id), url=f"{ai_base_url}/v1/verify")
     token = get_settings().sentry_ai_service_token
