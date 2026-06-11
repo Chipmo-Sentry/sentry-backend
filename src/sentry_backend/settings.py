@@ -140,6 +140,14 @@ class Settings(BaseSettings):
     # telegram_bot_token. None on both → alert notifications disabled.
     telegram_alert_chat_id: str | None = None
 
+    # T12: AI node offline watchdog. Background loop checks active nodes'
+    # last_seen_at every `node_watchdog_interval_sec` and pings the founder's
+    # Telegram (telegram_bot_token + telegram_chat_id) when a node has been
+    # silent for `node_offline_after_sec` (keep aligned with admin.py's 3-minute
+    # "online" cutoff), and again when it recovers. interval <= 0 disables.
+    node_watchdog_interval_sec: int = 60
+    node_offline_after_sec: int = 180
+
     # LD.2: per-IP rate limit on the public POST /api/v1/leads endpoint.
     lead_rate_limit: str = "5/hour"
     # Per-IP rate limits on credential/pairing brute-force surfaces.

@@ -55,8 +55,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await bootstrap_superadmin()
     except Exception:  # noqa: BLE001
         log.warning("bootstrap_superadmin_failed", exc_info=True)
+    # T12: AI node offline watchdog — Telegram ping when a node stops
+    # heartbeating (and when it recovers). Best-effort: never blocks boot.
+    from sentry_backend.services.node_watchdog import NodeWatchdog
+
+    watchdog = NodeWatchdog()
+    try:
+        watchdog.start()
+    except Exception:  # noqa: BLE001
+        log.warning("node_watchdog_start_failed", exc_info=True)
     yield
     log.info("stopping")
+    await watchdog.stop()
     await dispose_engine()
 
 
