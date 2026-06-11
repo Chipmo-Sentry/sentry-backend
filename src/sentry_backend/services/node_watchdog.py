@@ -28,6 +28,7 @@ import httpx
 from sqlalchemy import select
 
 from sentry_backend.logging_setup import get_logger
+from sentry_backend.schemas.ai_node import CameraHealth, parse_camera_health
 from sentry_backend.settings import get_settings
 
 log = get_logger("sentry_backend.node_watchdog")
@@ -41,6 +42,7 @@ class NodeLike(Protocol):
     hostname: str | None
     last_seen_at: datetime | None
     created_at: datetime
+    telemetry: str | None
 
 
 def is_offline(node: NodeLike, *, now: datetime, offline_after_sec: int) -> bool:
@@ -88,6 +90,69 @@ def detect_transitions(
     return newly_offline, recovered
 
 
+# ── Per-camera stream health (audit T12 #3) ────────────────────────────────
+# A camera key is (node_id, camera_id) — camera ids are only unique per node.
+CameraKey = tuple[UUID, str]
+
+
+def _camera_down(cam: CameraHealth) -> bool:
+    """Down = the node says error/stalled, or it reports 0 FPS while claiming
+    "ok" (defensive — current nodes never send that combination)."""
+    return cam.status != "ok" or cam.fps == 0
+
+
+def detect_camera_transitions(
+    nodes: Sequence[NodeLike],
+    candidate_down: set[CameraKey],
+    notified_down: set[CameraKey],
+    *,
+    now: datetime,
+    offline_after_sec: int,
+) -> tuple[list[tuple[NodeLike, CameraHealth]], list[tuple[NodeLike, CameraHealth]]]:
+    """Pure state-machine step for per-camera health: (newly_down, recovered).
+
+    Debounced: a camera must be down on TWO consecutive checks before it
+    notifies (one watchdog tick ≈ 60s), so a camera that reports "stalled" for
+    a single beat while its worker warms up YOLO doesn't false-alarm.
+
+    Offline nodes are skipped entirely — their telemetry is stale and the node
+    watchdog already alerted; alerting every camera too would just be noise.
+    Their camera state is kept as-is so recoveries still notify when the node
+    returns. Cameras that vanish from telemetry (worker stopped on purpose)
+    are pruned without a notification, mirroring detect_transitions.
+    """
+    newly_down: list[tuple[NodeLike, CameraHealth]] = []
+    recovered: list[tuple[NodeLike, CameraHealth]] = []
+    seen: set[CameraKey] = set()
+
+    for node in nodes:
+        if is_offline(node, now=now, offline_after_sec=offline_after_sec):
+            # Freeze this node's camera state until it comes back online.
+            seen.update(k for k in candidate_down | notified_down if k[0] == node.id)
+            continue
+        for cam in parse_camera_health(node.telemetry) or []:
+            key: CameraKey = (node.id, cam.camera_id)
+            seen.add(key)
+            if _camera_down(cam):
+                if key in notified_down:
+                    continue  # already alerted this outage
+                if key in candidate_down:
+                    candidate_down.discard(key)
+                    notified_down.add(key)
+                    newly_down.append((node, cam))
+                else:
+                    candidate_down.add(key)  # first sighting — wait one tick
+            else:
+                candidate_down.discard(key)
+                if key in notified_down:
+                    notified_down.discard(key)
+                    recovered.append((node, cam))
+
+    candidate_down.intersection_update(seen)
+    notified_down.intersection_update(seen)
+    return newly_down, recovered
+
+
 def _node_label(node: NodeLike) -> str:
     return node.name or node.hostname or str(node.id)
 
@@ -106,6 +171,18 @@ def _format_offline(node: NodeLike, *, now: datetime) -> str:
 
 def _format_recovered(node: NodeLike) -> str:
     return f"🟢 AI node буцаж онлайн боллоо — {_node_label(node)}"
+
+
+def _format_camera_down(node: NodeLike, cam: CameraHealth) -> str:
+    fps_txt = "?" if cam.fps is None else f"{cam.fps:g}"
+    return (
+        f"🟡 Камер унасан: {cam.camera_id} (node {_node_label(node)})\n"
+        f"⚠️ Төлөв: {cam.status}, FPS: {fps_txt}"
+    )
+
+
+def _format_camera_recovered(node: NodeLike, cam: CameraHealth) -> str:
+    return f"🟢 Камер сэргэлээ: {cam.camera_id} (node {_node_label(node)})"
 
 
 async def _send_telegram(text: str) -> None:
@@ -136,6 +213,10 @@ class NodeWatchdog:
 
     def __init__(self) -> None:
         self._notified_offline: set[UUID] = set()
+        # Per-camera health state (audit T12 #3): candidates seen down once
+        # (debounce) and cameras already alerted this outage.
+        self._camera_candidates: set[CameraKey] = set()
+        self._notified_cameras: set[CameraKey] = set()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -192,3 +273,24 @@ class NodeWatchdog:
         for node in recovered:
             log.info("ai_node_recovered", node_id=str(node.id), name=_node_label(node))
             await _send_telegram(_format_recovered(node))
+
+        # Per-camera stream health from the latest telemetry (audit T12 #3).
+        cams_down, cams_recovered = detect_camera_transitions(
+            nodes,
+            self._camera_candidates,
+            self._notified_cameras,
+            now=now,
+            offline_after_sec=settings.node_offline_after_sec,
+        )
+        for node, cam in cams_down:
+            log.warning(
+                "camera_stream_down",
+                node_id=str(node.id),
+                camera_id=cam.camera_id,
+                status=cam.status,
+                fps=cam.fps,
+            )
+            await _send_telegram(_format_camera_down(node, cam))
+        for node, cam in cams_recovered:
+            log.info("camera_stream_recovered", node_id=str(node.id), camera_id=cam.camera_id)
+            await _send_telegram(_format_camera_recovered(node, cam))

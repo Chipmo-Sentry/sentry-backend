@@ -1,9 +1,18 @@
 """AI node schemas — pairing, heartbeat, config, admin views."""
 
+import json
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    computed_field,
+    field_serializer,
+)
 
 # A node is "online" if its last heartbeat landed within this window. The
 # heartbeat interval is 60s; this tolerates a couple of missed/late beats
@@ -36,6 +45,43 @@ class AiNodePairResult(BaseModel):
     config: AiNodeConfig
 
 
+class CameraHealth(BaseModel):
+    """Per-camera stream health inside the node heartbeat (audit T12 #3).
+
+    Lets the cloud tell WHICH camera died instead of only seeing the summed
+    FPS dip. status: ok = inferring, stalled = worker alive but 0 FPS,
+    error = worker dead or RTSP read/open failure.
+    """
+
+    camera_id: str = Field(min_length=1, max_length=64)
+    fps: float | None = Field(default=None, ge=0)
+    status: Literal["ok", "stalled", "error"] = "ok"
+
+
+def parse_camera_health(telemetry: str | None) -> list[CameraHealth] | None:
+    """Extract the `cameras` list from a stored telemetry JSON string.
+
+    None when telemetry is missing, malformed, or from an old node version that
+    doesn't report per-camera health yet. Shared by the admin API (AiNodePublic)
+    and the node watchdog so both read the same shape.
+    """
+    if not telemetry:
+        return None
+    try:
+        data = json.loads(telemetry)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    cams = data.get("cameras")
+    if not isinstance(cams, list):
+        return None
+    try:
+        return [CameraHealth.model_validate(c) for c in cams]
+    except ValidationError:
+        return None
+
+
 class AiNodeHeartbeat(BaseModel):
     """Telemetry the node reports every ~60s."""
 
@@ -62,6 +108,10 @@ class AiNodeHeartbeat(BaseModel):
     sentry_cpu_pct: float | None = Field(default=None, ge=0, le=100)
     sentry_ram_mb: int | None = Field(default=None, ge=0)
     sentry_vram_mb: int | None = Field(default=None, ge=0)
+    # Per-camera stream health (audit T12 #3). Optional: old node versions don't
+    # send it. Stored inside `ai_nodes.telemetry` JSON with the rest of the body
+    # (no new table/migration); length-capped to keep that Text column bounded.
+    cameras: list[CameraHealth] | None = Field(default=None, max_length=64)
 
 
 class AiNodePairingCodePublic(BaseModel):
@@ -96,6 +146,14 @@ class AiNodePublic(BaseModel):
         if v.tzinfo is None:
             v = v.replace(tzinfo=UTC)
         return v.isoformat()
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def cameras(self) -> list[CameraHealth] | None:
+        """Per-camera stream health parsed from the latest heartbeat telemetry
+        (audit T12 #3). None for old node versions / no telemetry yet — the
+        superadmin UI can distinguish "unknown" from "no cameras" ([])."""
+        return parse_camera_health(self.telemetry)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
