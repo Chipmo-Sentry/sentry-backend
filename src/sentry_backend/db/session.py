@@ -23,6 +23,10 @@ def _build_engine() -> AsyncEngine:
         echo=settings.debug,
         pool_pre_ping=True,
         pool_recycle=300,
+        # Tunable via DB_POOL_SIZE / DB_MAX_OVERFLOW. Keep the sum (per replica)
+        # comfortably under Railway Postgres max_connections — see settings.py.
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
     )
 
 

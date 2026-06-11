@@ -3,7 +3,7 @@
 import enum
 from uuid import UUID
 
-from sqlalchemy import ARRAY, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import ARRAY, Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +31,9 @@ class AlertTrigger(enum.StrEnum):
 
 class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "alerts"
+    # T09: the dashboard's hot path lists an org's alerts newest-first; the
+    # composite index serves that without a sort over the whole org partition.
+    __table_args__ = (Index("ix_alerts_org_created_at", "organization_id", "created_at"),)
 
     clip_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),

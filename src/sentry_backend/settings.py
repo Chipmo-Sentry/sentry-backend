@@ -50,8 +50,42 @@ class Settings(BaseSettings):
     bootstrap_org_name: str = "Demo Retail Group"
     bootstrap_org_slug: str = "demo-retail"
 
+    # Where clip .mp4 files are written/read (upload, live cut, threshold cut).
+    # Env-configurable (CLIP_STORAGE_DIR). Default is a repo-relative dev path.
+    # ⚠️ PRODUCTION (Railway): the container disk is EPHEMERAL — it is wiped on
+    # every deploy/restart, taking every evidence clip with it. Attach a Railway
+    # Volume and set CLIP_STORAGE_DIR=/data/clips so clips survive restarts. See
+    # railway.toml for the founder's one-time dashboard steps. The directory is
+    # created on first write (mkdir parents=True, exist_ok=True).
     clip_storage_dir: str = "./storage/clips"
     max_clip_size_mb: int = 100
+
+    # --- Retention sweep (T09/T13/T15 — privacy-policy auto-deletion) ------
+    # services/retention.py runs every retention_sweep_interval_sec and deletes
+    # data strictly OLDER than each window. 0 or a negative value on any *_days
+    # knob disables that cleanup type (keep forever); interval <= 0 disables the
+    # whole background loop. Every sweep logs a structured count of deletions.
+    #   clip_retention_days         — evidence clips (by row created_at): the
+    #       .mp4 FILE is always removed; the DB row too, UNLESS an alert
+    #       references it — alerts.clip_id is NOT NULL + ON DELETE CASCADE, and
+    #       alert rows are business history that must outlive the footage, so
+    #       such clips keep their row with file_deleted_at stamped instead.
+    #   metric_retention_days       — ai_node_metrics telemetry rows (by ts),
+    #       deleted in bounded batches (never one giant DELETE).
+    #   pairing_code_retention_days — agent + ai-node pairing codes whose
+    #       expires_at is older than N days (kept briefly as an audit trail).
+    retention_sweep_interval_sec: int = 3600
+    clip_retention_days: int = 90
+    metric_retention_days: int = 30
+    pairing_code_retention_days: int = 7
+
+    # --- DB connection pool (session.py) ----------------------------------
+    # SQLAlchemy async pool sizing. Defaults match the historical hardcoded
+    # values. ⚠️ Railway Postgres has a finite max_connections (the Hobby/Dev
+    # plan default is ~22–100 depending on tier); pool_size + max_overflow per
+    # replica must stay well under it, leaving headroom for migrations/psql.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
 
     # Public base URL of the customer app — used to build invite links.
     app_base_url: str = "http://localhost:3000"

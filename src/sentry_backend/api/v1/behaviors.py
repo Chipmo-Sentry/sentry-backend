@@ -10,8 +10,10 @@ criteria (`builtin=true`) have detectors; a custom criterion is inert (scores
 0) until a detector for its key ships in sentry-ai. Disabling a criterion
 (`active=false`) makes the poller send weight 0, so the scorer skips it.
 
-Thresholds are ABSOLUTE accumulated-score units: green `< green_max`, yellow
-`[green_max, yellow_max)`, red `>= yellow_max`. L5 fires when color == red.
+Thresholds are ABSOLUTE 0-100 risk-score units (ADR-0024 4-level model):
+LOW `< green_max`, MEDIUM `[green_max, yellow_max)`, HIGH `[yellow_max,
+high_max)`, CRITICAL `>= high_max`. L5 fires when a person's live risk crosses
+the per-camera `risk_threshold` (sustained), then is VLM-confirmed.
 """
 
 from __future__ import annotations

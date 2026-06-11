@@ -42,3 +42,9 @@ class Clip(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    # Retention (T09/T13): set when the sweep removed the on-disk .mp4 but had
+    # to KEEP this row because an alert references it (alerts.clip_id is
+    # NOT NULL + ON DELETE CASCADE — dropping the row would destroy the alert,
+    # which is business history). Also excludes the row from future sweeps.
+    # NULL = file still expected on disk.
+    file_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

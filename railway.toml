@@ -26,3 +26,14 @@ numReplicas = 1
 #   ALLOWED_ORIGINS           — comma-separated, e.g. https://app.sentry.chipmo.mn
 #   ENVIRONMENT=production
 #   LOG_LEVEL=INFO
+#   CLIP_STORAGE_DIR          — MUST point inside a Railway Volume (see below)
+#
+# ⚠️ T09 EVIDENCE CLIPS — Railway Volume (one-time dashboard setup):
+# The container disk is EPHEMERAL: every deploy/restart wipes it, taking all
+# evidence clips with it. Volumes cannot be declared in this file — create one
+# in the dashboard:
+#   1. Service → right-click / Cmd+K → "Attach Volume", mount path: /data
+#   2. Set env var CLIP_STORAGE_DIR=/data/clips
+#   3. Redeploy, then check boot logs for `clip_storage_ready` (a
+#      `clip_storage_not_writable` error means the mount isn't writable by the
+#      non-root `app` user — Railway's RAILWAY_RUN_UID may need adjusting).

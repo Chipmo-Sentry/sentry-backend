@@ -55,6 +55,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await bootstrap_superadmin()
     except Exception:  # noqa: BLE001
         log.warning("bootstrap_superadmin_failed", exc_info=True)
+    # T09: evidence-clip storage must be proven writable NOW, not at the first
+    # upload — on Railway a missing Volume / CLIP_STORAGE_DIR means clips land
+    # on the ephemeral disk and die with the next deploy. Logs loudly, never
+    # blocks boot (live view etc. keep working while ops fixes the mount).
+    from sentry_backend.services.clip_service import ensure_clip_storage_writable
+
+    ensure_clip_storage_writable()
     # T12: AI node offline watchdog — Telegram ping when a node stops
     # heartbeating (and when it recovers). Best-effort: never blocks boot.
     from sentry_backend.services.node_watchdog import NodeWatchdog
@@ -64,8 +71,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         watchdog.start()
     except Exception:  # noqa: BLE001
         log.warning("node_watchdog_start_failed", exc_info=True)
+    # T09/T13/T15: retention sweeper — enforces the privacy policy's
+    # "auto-delete after N days" promise (clips, telemetry, pairing codes).
+    from sentry_backend.services.retention import RetentionSweeper
+
+    sweeper = RetentionSweeper()
+    try:
+        sweeper.start()
+    except Exception:  # noqa: BLE001
+        log.warning("retention_start_failed", exc_info=True)
     yield
     log.info("stopping")
+    await sweeper.stop()
     await watchdog.stop()
     await dispose_engine()
 
