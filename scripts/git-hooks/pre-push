@@ -10,6 +10,15 @@
 
 set -e
 
+# Graceful skip when uv isn't on PATH (e.g. GUI git clients / bare shells).
+# Running the tools via the global python instead would die with
+# "ModuleNotFoundError: sentry_backend" — never call them without `uv run`.
+# CI runs the exact same checks, so skipping locally is safe (just noisier).
+if ! command -v uv >/dev/null 2>&1; then
+  echo "[pre-push] ⚠ uv not found on PATH — skipping local checks (CI runs the same gate)"
+  exit 0
+fi
+
 echo "[pre-push] ruff format --check ."
 uv run ruff format --check . || {
   echo ""
