@@ -64,8 +64,10 @@ async def get_or_create_profile(db: AsyncSession, org_id: UUID) -> BillingProfil
     return profile
 
 
-async def _profile_for_update(db: AsyncSession, org_id: UUID) -> BillingProfile:
-    """Row-locked profile for a balance mutation (serializes concurrent posts)."""
+async def profile_for_update(db: AsyncSession, org_id: UUID) -> BillingProfile:
+    """Row-locked profile for any profile mutation (serializes concurrent posts
+    AND promo-window extensions — an unlocked read-modify-write of
+    promo_free_until can lose one code's days when two redeems race)."""
     result = await db.execute(
         select(BillingProfile).where(BillingProfile.org_id == org_id).with_for_update()
     )
@@ -99,7 +101,7 @@ async def post_entry(
     else:
         dr_account, cr_account = accounts_for(kind)
 
-    profile = await _profile_for_update(db, org_id)
+    profile = await profile_for_update(db, org_id)
     entry = BillingJournal(
         org_id=org_id,
         kind=kind,
