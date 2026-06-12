@@ -55,6 +55,15 @@ class AcceptInvite(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class OrgDeleteConfirm(BaseModel):
+    """Owner deletes their own org — must retype the org slug to confirm.
+
+    Guards against an accidental DELETE (fat-finger, replayed request) wiping a
+    whole tenant: the slug is something only a deliberate caller types in."""
+
+    confirm_slug: str = Field(min_length=1, max_length=63)
+
+
 class MemberUpdate(BaseModel):
     """Org admin toggles a member's access (lock = is_active False)."""
 

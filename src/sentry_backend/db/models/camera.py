@@ -25,6 +25,9 @@ class Camera(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     rtsp_url_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     # {"x": int, "y": int, "w": int, "h": int} — bbox for Stage 1 shelf-zone filter
     shelf_zone_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # DEPRECATED: superseded by `risk_threshold` (0-100, the live-mode breach
+    # threshold). Kept only to avoid a migration drop during the pilot; no code
+    # reads it. Do NOT add new references — use risk_threshold instead.
     stage2_threshold: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

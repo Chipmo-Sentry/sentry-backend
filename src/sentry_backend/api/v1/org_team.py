@@ -34,9 +34,10 @@ from sentry_backend.schemas.org_team import (
     InviteCreate,
     InviteResult,
     MemberUpdate,
+    OrgDeleteConfirm,
     PendingInvite,
 )
-from sentry_backend.services import email_service
+from sentry_backend.services import email_service, org_delete
 from sentry_backend.settings import get_settings
 
 log = get_logger("sentry_backend.api.org")
@@ -51,6 +52,48 @@ async def list_members(
     """Members of the caller's org (any member may view their own team)."""
     rows = await org_repo.list_members(db, org_id)
     return [OrgMemberPublic(user=UserPublic.model_validate(u), role=r) for u, r in rows]
+
+
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def delete_my_org(
+    body: OrgDeleteConfirm,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    """Owner deletes their own organization (T15 #3 — privacy policy promise).
+
+    Owner-only (admins manage the team; only the owner can erase the tenant).
+    The caller must retype the org slug (`confirm_slug`) so a stray DELETE can't
+    wipe everything. All org data cascades in the DB; clip evidence files are
+    removed from disk first. Members keep their user accounts but lose all
+    org-scoped access the moment the membership rows cascade away."""
+    role = await org_repo.get_member_role(db, user_id=actor.id, organization_id=org_id)
+    if role != OrgRole.owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Зөвхөн байгууллагын эзэн (owner) байгууллагаа устгах боломжтой.",
+        )
+    org = await org_repo.get_org(db, org_id)
+    if org is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Байгууллага олдсонгүй.",
+        )
+    if body.confirm_slug != org.slug:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Баталгаажуулахын тулд байгууллагын slug-ээ зөв оруулна уу.",
+        )
+    sweep = await org_delete.delete_organization(db, org)
+    log.info(
+        "org.self_deleted",
+        org_id=str(org_id),
+        slug=org.slug,
+        by=str(actor.id),
+        clips_removed=sweep.removed,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/invitations", response_model=list[PendingInvite])

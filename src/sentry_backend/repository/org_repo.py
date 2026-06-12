@@ -70,6 +70,19 @@ async def add_membership(
     return member
 
 
+async def get_member_role(
+    db: AsyncSession, *, user_id: UUID, organization_id: UUID
+) -> OrgRole | None:
+    """The user's role in ``organization_id``, or None if not a member."""
+    result = await db.execute(
+        select(OrganizationMember.role).where(
+            OrganizationMember.user_id == user_id,
+            OrganizationMember.organization_id == organization_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 async def remove_membership(db: AsyncSession, *, user_id: UUID, organization_id: UUID) -> None:
     await db.execute(
         delete(OrganizationMember).where(

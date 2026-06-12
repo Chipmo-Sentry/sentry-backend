@@ -36,6 +36,7 @@ from sentry_backend.schemas.org import (
     OrganizationPublic,
     UserInvite,
 )
+from sentry_backend.services import org_delete
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -204,6 +205,25 @@ async def get_org(
             detail="Байгууллага олдсонгүй.",
         )
     return OrganizationPublic.model_validate(org)
+
+
+@router.delete("/orgs/{org_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_org(
+    org_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> None:
+    """Delete a tenant entirely (T15 #3 — the privacy policy's deletion promise).
+
+    Every org-scoped row cascades in the DB; the org's clip evidence FILES are
+    unlinked from disk first (a cascade can't reach the filesystem)."""
+    org = await org_repo.get_org(db, org_id)
+    if org is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Байгууллага олдсонгүй.",
+        )
+    await org_delete.delete_organization(db, org)
 
 
 @router.get("/orgs/{org_id}/members", response_model=list[OrgMemberPublic])
