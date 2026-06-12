@@ -13,11 +13,13 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from sentry_backend import __version__
 from sentry_backend.api import ws_live
 from sentry_backend.api.v1 import admin as admin_v1
+from sentry_backend.api.v1 import admin_billing as admin_billing_v1
 from sentry_backend.api.v1 import agents as agents_v1
 from sentry_backend.api.v1 import ai_nodes as ai_nodes_v1
 from sentry_backend.api.v1 import alerts as alerts_v1
 from sentry_backend.api.v1 import auth as auth_v1
 from sentry_backend.api.v1 import behaviors as behaviors_v1
+from sentry_backend.api.v1 import billing as billing_v1
 from sentry_backend.api.v1 import cameras as cameras_v1
 from sentry_backend.api.v1 import clips as clips_v1
 from sentry_backend.api.v1 import feedback as feedback_v1
@@ -80,8 +82,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         sweeper.start()
     except Exception:  # noqa: BLE001
         log.warning("retention_start_failed", exc_info=True)
+    # T14: daily prepaid-wallet usage charger (one usage_charge per org per
+    # Ulaanbaatar day; the DB unique index keeps it idempotent).
+    from sentry_backend.services.billing.charger import BillingCharger
+
+    charger = BillingCharger()
+    try:
+        charger.start()
+    except Exception:  # noqa: BLE001
+        log.warning("billing_charger_start_failed", exc_info=True)
     yield
     log.info("stopping")
+    await charger.stop()
     await sweeper.stop()
     await watchdog.stop()
     await dispose_engine()
@@ -166,6 +178,8 @@ def create_app() -> FastAPI:
     app.include_router(leads_v1.router)
     app.include_router(internal_v1.router)
     app.include_router(admin_v1.router)
+    app.include_router(billing_v1.router)
+    app.include_router(admin_billing_v1.router)
     app.include_router(org_team_v1.router)
     app.include_router(agents_v1.router)
     app.include_router(ai_nodes_v1.router)

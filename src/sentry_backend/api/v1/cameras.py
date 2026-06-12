@@ -20,6 +20,8 @@ from sentry_backend.schemas.camera import (
 )
 from sentry_backend.security import create_stream_token
 from sentry_backend.services import live_provision
+from sentry_backend.services.billing.gating import SUSPENDED_DETAIL, org_billing_status
+from sentry_backend.services.billing.status import BillingStatus
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/cameras", tags=["cameras"])
@@ -91,6 +93,13 @@ async def get_stream_token(
     Any org member (read access) may watch; the token confines playback to this
     camera's mediamtx_path and is validated by the MediaMTX authHTTP endpoint.
     """
+    # T14 gating: live viewing stops for a suspended org. Evidence recording
+    # (alerts/clips) is deliberately NOT gated — нотолгоо үргэлжилнэ.
+    if await org_billing_status(db, org_id) is BillingStatus.suspended:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=SUSPENDED_DETAIL,
+        )
     cam = await camera_repo.get_camera_for_org(db, camera_id, org_id)
     if cam is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")

@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     #   pairing_code_retention_days — agent + ai-node pairing codes whose
     #       expires_at is older than N days (kept briefly as an audit trail).
     retention_sweep_interval_sec: int = 3600
+    # T14: daily billing charger (services/billing/charger.py). The loop wakes
+    # every N seconds and posts at most ONE usage_charge per org per
+    # Ulaanbaatar calendar day (DB partial unique index makes retries/races
+    # no-ops). <= 0 disables the loop entirely.
+    billing_charge_interval_sec: int = 3600
     clip_retention_days: int = 90
     metric_retention_days: int = 30
     pairing_code_retention_days: int = 7

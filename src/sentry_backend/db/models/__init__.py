@@ -4,6 +4,15 @@ from sentry_backend.db.models.agent import Agent, AgentPairingCode
 from sentry_backend.db.models.ai_node import AiNode, AiNodeMetric, AiNodePairingCode
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
 from sentry_backend.db.models.app_config import AppConfig
+from sentry_backend.db.models.billing import (
+    BillingJournal,
+    BillingProfile,
+    JournalKind,
+    LedgerAccount,
+    PromoCode,
+    PromoKind,
+    PromoRedemption,
+)
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.clip import Clip
 from sentry_backend.db.models.feedback import Feedback, FeedbackVerdict
@@ -28,16 +37,23 @@ __all__ = [
     "AlertCategory",
     "AlertLevel",
     "AppConfig",
+    "BillingJournal",
+    "BillingProfile",
     "Camera",
     "Clip",
     "Feedback",
     "FeedbackVerdict",
     "Invitation",
+    "JournalKind",
     "Lead",
     "LeadStatus",
+    "LedgerAccount",
     "Organization",
     "OrganizationMember",
     "OrgRole",
+    "PromoCode",
+    "PromoKind",
+    "PromoRedemption",
     "Store",
     "User",
     "VerifiedCase",
