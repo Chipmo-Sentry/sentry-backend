@@ -82,6 +82,11 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     person_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # When triggered_by=live_threshold: peak risk_pct observed for this person
     peak_risk_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # When triggered_by=live_threshold: episode context at breach time — fired
+    # criterion keys (first-fired order) + completed sequence rule keys. Stable
+    # keys; Mongolian labels come from /api/v1/behaviors (label_mn).
+    triggered_behaviors: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)
+    triggered_sequences: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)
     # Embedding of `reasoning` computed by the AI node at verify time (docs/19
     # Phase 4 RAG). Lets staff feedback create a verified_case for retrieval
     # WITHOUT a second embed round-trip. Null on live-threshold alerts.

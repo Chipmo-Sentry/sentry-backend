@@ -168,6 +168,21 @@ class LiveTrack(BaseModel):
     # Accumulated risk score (absolute, not percent — see /api/v1/behaviors).
     risk_pct: float = Field(default=0.0, ge=0.0)
     color: Literal["green", "yellow", "red"] = "green"
+    # v2 behavior engine context (REV.2). These previously existed only on the
+    # AI side and were silently stripped here (extra="ignore") — so sequences /
+    # store_person_id never reached browsers or the threshold handler.
+    level: str = "LOW"
+    state: str = "IDLE"
+    sequences: list[str] = Field(default_factory=list)
+    # Episode-accumulated criteria: stable keys (first-fired order), per-key
+    # banked score, Mongolian display strings, and when the episode opened.
+    behaviors: list[str] = Field(default_factory=list)
+    behavior_scores: dict[str, float] = Field(default_factory=dict)
+    reasons: list[str] = Field(default_factory=list)
+    episode_started_ms: int | None = None
+    # Cross-camera re-ID (ADR-0023)
+    store_person_id: int | None = None
+    store_risk_pct: float | None = None
 
 
 class LiveFrame(BaseModel):

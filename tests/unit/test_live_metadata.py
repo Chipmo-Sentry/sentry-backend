@@ -71,3 +71,49 @@ def test_empty_batch_rejected() -> None:
 def test_bad_color_rejected() -> None:
     with pytest.raises(ValidationError):
         LiveTrack(person_id=1, box=(0, 0, 1, 1), color="purple")  # type: ignore[arg-type]
+
+
+# === REV.2 — v2 behavior-engine context fields survive validation ===
+
+
+def test_rev2_episode_fields_pass_through() -> None:
+    """sequences/behaviors/etc. were previously stripped by extra="ignore" —
+    they must now survive into the dict published to browsers + threshold."""
+    track = {
+        "person_id": 3,
+        "box": [10.0, 20.0, 110.0, 220.0],
+        "det_confidence": 0.88,
+        "risk_pct": 72.0,
+        "color": "red",
+        "level": "HIGH",
+        "state": "CONCEALMENT",
+        "sequences": ["seq_pickup_bag"],
+        "behaviors": ["looking_around", "item_pickup", "bag_interaction"],
+        "behavior_scores": {"looking_around": 4.0, "item_pickup": 10.0},
+        "reasons": ["Орчноо харах", "cell phone авах"],
+        "episode_started_ms": 1_700_000_000_000,
+        "store_person_id": 12,
+        "store_risk_pct": 80.5,
+    }
+    frame = LiveFrame.model_validate(_frame(tracks=[track]))
+    dumped = frame.model_dump(mode="json")["tracks"][0]
+    assert dumped["sequences"] == ["seq_pickup_bag"]
+    assert dumped["behaviors"] == ["looking_around", "item_pickup", "bag_interaction"]
+    assert dumped["behavior_scores"] == {"looking_around": 4.0, "item_pickup": 10.0}
+    assert dumped["reasons"] == ["Орчноо харах", "cell phone авах"]
+    assert dumped["episode_started_ms"] == 1_700_000_000_000
+    assert dumped["level"] == "HIGH"
+    assert dumped["state"] == "CONCEALMENT"
+    assert dumped["store_person_id"] == 12
+    assert dumped["store_risk_pct"] == 80.5
+
+
+def test_rev2_fields_default_for_old_ai_nodes() -> None:
+    """An older AI node that doesn't send the new fields still validates."""
+    frame = LiveFrame.model_validate(_frame())
+    dumped = frame.model_dump(mode="json")["tracks"][0]
+    assert dumped["behaviors"] == []
+    assert dumped["behavior_scores"] == {}
+    assert dumped["reasons"] == []
+    assert dumped["episode_started_ms"] is None
+    assert dumped["sequences"] == []

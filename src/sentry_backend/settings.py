@@ -167,6 +167,14 @@ class Settings(BaseSettings):
     # Per-person sustain time — risk must STAY above threshold for this long
     # before we fire (avoids flicker on one-frame spikes).
     live_breach_sustain_sec: float = 1.0
+    # After a confirmed breach, wait this long before asking the node to cut —
+    # so the clip includes the act COMPLETING after the threshold crossing.
+    live_breach_post_roll_sec: float = 10.0
+    # Dynamic clip window: pad before the episode's first criterion, and the
+    # hard cap on total clip length (long loitering episodes get trimmed from
+    # the old end — the breach moment + post-roll always survive).
+    live_clip_pre_pad_sec: int = 3
+    live_clip_max_sec: int = 90
 
     # LD.1: founder notification for new landing leads. When both are set, a
     # new demo request pings this Telegram chat; otherwise leads are only

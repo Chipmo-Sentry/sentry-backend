@@ -23,6 +23,7 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -67,6 +68,12 @@ class _PersonState:
     # Latest non-empty behavior-engine sequence rule keys for this track —
     # carried into the breach so the RAG query (T08) can describe the event.
     last_sequences: list[str] = field(default_factory=list)
+    # Episode context from the v2 behavior engine: fired criterion keys
+    # (first-fired order) and when the episode's first criterion fired (node
+    # epoch ms). Both stored on the Alert and used to size the breach clip so
+    # it covers the WHOLE episode, not a fixed [-5s, +10s].
+    last_behaviors: list[str] = field(default_factory=list)
+    episode_started_ms: int | None = None
 
 
 class ThresholdHandler:
@@ -136,6 +143,15 @@ class ThresholdHandler:
                 seqs = t.get("sequences")
                 if isinstance(seqs, list) and seqs:
                     st.last_sequences = [str(s) for s in seqs]
+                # Episode context: fired criterion keys + when the episode opened.
+                # Kept "last non-empty" so the values that caused the breach
+                # survive even if an IDLE reset lands before the breach fires.
+                behs = t.get("behaviors")
+                if isinstance(behs, list) and behs:
+                    st.last_behaviors = [str(b) for b in behs]
+                ep_ms = t.get("episode_started_ms")
+                if isinstance(ep_ms, int) and ep_ms > 0:
+                    st.episode_started_ms = ep_ms
 
                 # Cooldown still active → don't fire
                 if now - st.last_breach_ts < settings.live_breach_cooldown_sec:
@@ -154,11 +170,32 @@ class ThresholdHandler:
                         # Confirmed sustained breach
                         peak = st.peak_risk_pct
                         sequences = list(st.last_sequences)
+                        behaviors = list(st.last_behaviors)
+                        # Node-clock anchor for the clip window: the breaching
+                        # frame's capture ts (same clock as episode_started_ms).
+                        frame_ts = frame.get("ts_ms")
+                        breach_ts_ms = (
+                            frame_ts
+                            if isinstance(frame_ts, int) and frame_ts > 0
+                            else int(time.time() * 1000)
+                        )
+                        episode_ms = st.episode_started_ms
                         st.last_breach_ts = now
                         st.above_threshold_since = None
                         st.peak_risk_pct = 0.0
                         self._inflight.add(key)
-                        asyncio.create_task(self._handle_breach(camera, pid, peak, key, sequences))
+                        asyncio.create_task(
+                            self._handle_breach(
+                                camera,
+                                pid,
+                                peak,
+                                key,
+                                sequences,
+                                behaviors=behaviors,
+                                episode_started_ms=episode_ms,
+                                breach_ts_ms=breach_ts_ms,
+                            )
+                        )
                 else:
                     st.above_threshold_since = None
 
@@ -186,9 +223,21 @@ class ThresholdHandler:
         peak_risk_pct: float,
         key: tuple[str, int],
         sequences: list[str] | None = None,
+        *,
+        behaviors: list[str] | None = None,
+        episode_started_ms: int | None = None,
+        breach_ts_ms: int | None = None,
     ) -> None:
         try:
-            await self._handle_breach_inner(camera, person_id, peak_risk_pct, sequences)
+            await self._handle_breach_inner(
+                camera,
+                person_id,
+                peak_risk_pct,
+                sequences,
+                behaviors=behaviors,
+                episode_started_ms=episode_started_ms,
+                breach_ts_ms=breach_ts_ms,
+            )
         except Exception:  # noqa: BLE001
             log.exception(
                 "threshold_handler.breach_failed",
@@ -205,6 +254,10 @@ class ThresholdHandler:
         person_id: int,
         peak_risk_pct: float,
         sequences: list[str] | None = None,
+        *,
+        behaviors: list[str] | None = None,
+        episode_started_ms: int | None = None,
+        breach_ts_ms: int | None = None,
     ) -> None:
         settings = get_settings()
         cam_path = camera.mediamtx_path
@@ -216,6 +269,25 @@ class ThresholdHandler:
             camera_path=cam_path,
             person_id=person_id,
             peak_risk_pct=peak_risk_pct,
+            behaviors=behaviors,
+            episode_started_ms=episode_started_ms,
+        )
+
+        # Let the act COMPLETE before cutting: the recording only contains
+        # footage up to "now", so cutting at breach time would truncate the clip
+        # at the breach moment despite the +post-roll in the requested window.
+        post_roll = max(0.0, settings.live_breach_post_roll_sec)
+        if post_roll:
+            await asyncio.sleep(post_roll)
+
+        # Dynamic window: cover the whole episode (first criterion → breach →
+        # post-roll) instead of a fixed [-5s, +10s].
+        start_offset_sec, duration_sec = compute_clip_window(
+            breach_ts_ms=breach_ts_ms,
+            episode_started_ms=episode_started_ms,
+            pre_pad_sec=settings.live_clip_pre_pad_sec,
+            post_roll_sec=post_roll,
+            max_sec=settings.live_clip_max_sec,
         )
 
         # 1. Ask the AI node to cut the breach clip from ITS recordings AND
@@ -226,16 +298,24 @@ class ThresholdHandler:
         if not ai_url:
             log.warning("threshold_handler.no_ai_url")
             return
+        # Same service-token header as the /v1/verify path (ai_service) — the
+        # cut-verify call previously sent none, which breaks once the node
+        # enforces AI_SERVICE_TOKEN.
+        token = settings.sentry_ai_service_token
+        headers = {"Authorization": f"Bearer {token}"} if token else None
         try:
             async with httpx.AsyncClient(timeout=settings.sentry_ai_timeout_sec) as client:
                 resp = await client.post(
                     f"{ai_url}/v1/cut-verify",
+                    headers=headers,
                     json={
                         "mediamtx_path": cam_path,
                         "store_id": str(camera.store_id) if camera.store_id else None,
                         "camera_id": str(camera.id),
                         "person_id": person_id,
                         "peak_risk_pct": peak_risk_pct,
+                        "start_offset_sec": start_offset_sec,
+                        "duration_sec": duration_sec,
                         # RAG (T08): Mongolian event description in the same
                         # register as verified_case descriptions (VLM reasoning)
                         # so the node retrieves this store's similar past cases.
@@ -376,6 +456,8 @@ class ThresholdHandler:
                 triggered_by=AlertTrigger.live_threshold,
                 person_id=person_id,
                 peak_risk_pct=peak_risk_pct,
+                triggered_behaviors=behaviors or None,
+                triggered_sequences=sequences or None,
                 embedding=embedding,
             )
             alert_public = AlertPublic.model_validate(alert)
@@ -400,6 +482,42 @@ class ThresholdHandler:
 
 
 # === Helpers ===
+
+
+def compute_clip_window(
+    *,
+    breach_ts_ms: int | None,
+    episode_started_ms: int | None,
+    pre_pad_sec: int,
+    post_roll_sec: float,
+    max_sec: int,
+) -> tuple[int, int]:
+    """Size the breach clip so it covers the WHOLE episode.
+
+    The cut runs on the AI node ~post_roll_sec after the breach (we sleep that
+    long first), so node-"now" at cut time ≈ breach + post_roll. The window we
+    request ends at that "now" and reaches back to the episode's first fired
+    criterion minus pre_pad. Returns (start_offset_sec, duration_sec) for
+    CutVerifyRequest. breach_ts_ms and episode_started_ms are both NODE clocks
+    (frame ts_ms / TrackPayload.episode_started_ms), so backend↔node skew
+    cancels out. Falls back to the legacy 5s pre-roll when episode start is
+    unknown. Capped at max_sec by trimming the OLD end — the breach moment and
+    post-roll always survive.
+    """
+    if (
+        episode_started_ms is not None
+        and breach_ts_ms is not None
+        and episode_started_ms <= breach_ts_ms
+    ):
+        pre_sec = (breach_ts_ms - episode_started_ms) / 1000.0 + pre_pad_sec
+    else:
+        pre_sec = 5.0  # legacy fixed pre-roll
+    # +2s slack absorbs HTTP/queue latency between our sleep ending and the
+    # node stamping its own "now" — without it the episode start can fall just
+    # outside the window.
+    duration = math.ceil(pre_sec + post_roll_sec + 2.0)
+    duration = max(5, min(max_sec, duration))
+    return -duration, duration
 
 
 async def _resolve_camera_by_mediamtx_path(path: str) -> Camera | None:

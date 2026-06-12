@@ -27,6 +27,10 @@ class AlertPublic(BaseModel):
     triggered_by: AlertTrigger = AlertTrigger.manual_upload
     person_id: int | None = None
     peak_risk_pct: float | None = None
+    # Behavior-engine episode context at breach time: fired criterion keys
+    # (first-fired order) + completed sequence rule keys. Labels via /behaviors.
+    triggered_behaviors: list[str] | None = None
+    triggered_sequences: list[str] | None = None
 
 
 class AlertCreateInternal(BaseModel):

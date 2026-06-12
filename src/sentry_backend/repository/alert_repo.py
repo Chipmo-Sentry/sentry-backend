@@ -61,6 +61,8 @@ async def create_alert(
     triggered_by: AlertTrigger = AlertTrigger.manual_upload,
     person_id: int | None = None,
     peak_risk_pct: float | None = None,
+    triggered_behaviors: list[str] | None = None,
+    triggered_sequences: list[str] | None = None,
     embedding: list[float] | None = None,
 ) -> Alert:
     alert = Alert(
@@ -77,6 +79,8 @@ async def create_alert(
         triggered_by=triggered_by,
         person_id=person_id,
         peak_risk_pct=peak_risk_pct,
+        triggered_behaviors=triggered_behaviors,
+        triggered_sequences=triggered_sequences,
         embedding=embedding,
     )
     db.add(alert)
