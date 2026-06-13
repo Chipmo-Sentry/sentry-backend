@@ -19,6 +19,10 @@ class ClipPublic(BaseModel):
     file_size_bytes: int
     sha256: str
     created_at: datetime
+    # Set once the clip FILE has been removed (retention sweep, or lost when it
+    # lived on ephemeral disk before a Volume was attached). The row survives as
+    # evidence history; the UI shows "unavailable" instead of a broken player.
+    file_deleted_at: datetime | None = None
 
 
 class ClipUploadMeta(BaseModel):

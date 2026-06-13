@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
@@ -122,6 +123,17 @@ async def download_clip(
     clip = await clip_repo.get_clip_for_org(db, clip_id, org_id)
     if clip is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Клип олдсонгүй.")
+    # The row is evidence history, but the FILE can be gone — retention sweep, or
+    # (the common case before a Railway Volume is attached) wiped when it lived on
+    # the container's ephemeral disk across a redeploy. Return a clear 410 so the
+    # player shows "unavailable" instead of a silent black box / opaque 500.
+    file_present = await asyncio.to_thread(Path(clip.storage_path).exists)
+    if clip.file_deleted_at is not None or not file_present:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Бичлэг серверт байхгүй болсон (хадгалалтын Volume тохируулагдаагүй "
+            "эсвэл хугацаа дууссан). Шинэ бичлэгүүд Volume тохируулсны дараа хадгалагдана.",
+        )
     return FileResponse(
         path=clip.storage_path,
         media_type="video/mp4",
