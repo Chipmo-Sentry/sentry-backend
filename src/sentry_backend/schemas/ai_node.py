@@ -112,6 +112,13 @@ class AiNodeHeartbeat(BaseModel):
     # send it. Stored inside `ai_nodes.telemetry` JSON with the rest of the body
     # (no new table/migration); length-capped to keep that Text column bounded.
     cameras: list[CameraHealth] | None = Field(default=None, max_length=64)
+    # Central-control feedback (ADR-0026): the VLM provider the node ACTUALLY uses
+    # (effective), whether its model is reachable, and an error if not. Lets the
+    # dashboard show applied-on-server vs applying vs error next to the desired
+    # provider. Stored in telemetry JSON; does NOT overwrite the desired provider.
+    provider_effective: str | None = Field(default=None, max_length=64)
+    provider_ready: bool | None = None
+    provider_error: str | None = Field(default=None, max_length=300)
 
 
 class AiNodePairingCodePublic(BaseModel):
@@ -154,6 +161,39 @@ class AiNodePublic(BaseModel):
         (audit T12 #3). None for old node versions / no telemetry yet — the
         superadmin UI can distinguish "unknown" from "no cameras" ([])."""
         return parse_camera_health(self.telemetry)
+
+    def _telemetry_obj(self) -> dict[str, object] | None:
+        if not self.telemetry:
+            return None
+        try:
+            data = json.loads(self.telemetry)
+        except ValueError:
+            return None
+        return data if isinstance(data, dict) else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def provider_effective(self) -> str | None:
+        """VLM provider the node actually runs (from its last heartbeat). The UI
+        compares this to `provider` (desired) to show applied vs applying."""
+        obj = self._telemetry_obj()
+        v = obj.get("provider_effective") if obj else None
+        return v if isinstance(v, str) else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def provider_ready(self) -> bool | None:
+        obj = self._telemetry_obj()
+        v = obj.get("provider_ready") if obj else None
+        return v if isinstance(v, bool) else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def provider_error(self) -> str | None:
+        """Why the effective provider isn't ready (e.g. model not pulled), or None."""
+        obj = self._telemetry_obj()
+        v = obj.get("provider_error") if obj else None
+        return v if isinstance(v, str) else None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
