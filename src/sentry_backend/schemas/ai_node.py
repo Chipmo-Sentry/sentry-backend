@@ -89,6 +89,10 @@ class AiNodeHeartbeat(BaseModel):
     vram_mb: int | None = Field(default=None, ge=0)  # legacy alias; prefer vram_used_mb below
     active_cameras: int | None = None
     version: str | None = Field(default=None, max_length=64)
+    # Effective VLM provider the node actually runs (from its .env). Stored on the
+    # node so the dashboard shows reality, not a stale central default. Old nodes
+    # don't send it (None → keep the existing value).
+    provider: str | None = Field(default=None, max_length=64)
     # Per-dependency health the node probes locally (e.g. {"ollama": true,
     # "ingest": false, "ai": true}). Opaque map so the node can add keys
     # without a schema change; surfaced read-only in superadmin.
