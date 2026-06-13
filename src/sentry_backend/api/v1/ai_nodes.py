@@ -73,10 +73,10 @@ async def ai_node_heartbeat(
     telemetry = json.dumps(body.model_dump(exclude_none=True))
     if body.version and body.version != node.version:
         node.version = body.version
-    # The node is authoritative for its own VLM provider (set via its .env); keep
-    # the displayed config in sync with what it actually runs.
-    if body.provider and body.provider != node.provider:
-        node.provider = body.provider
+    # NB: provider is BACKEND-authoritative (central control, ADR-0026) — set via
+    # the superadmin dropdown (PATCH /admin/ai-nodes) and polled+applied by the
+    # node. The heartbeat does NOT overwrite it (that would revert the operator's
+    # choice). The config returned below is what the node will hot-apply.
     await ai_node_repo.touch_heartbeat(db, node, telemetry)
     # Append to the resource time-series for the observability dashboard (docs/19).
     await ai_node_repo.insert_metric(db, node.id, body.model_dump())

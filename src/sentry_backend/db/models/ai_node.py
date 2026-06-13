@@ -37,7 +37,7 @@ class AiNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Centrally-managed config (pushed to the node via GET /ai-nodes/config).
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    provider: Mapped[str] = mapped_column(String(64), default="minicpm-v-2.6", nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), default="qwen3-vl-4b", nullable=False)
     frame_skip: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
 
     paired_by_user_id: Mapped[UUID | None] = mapped_column(
