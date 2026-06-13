@@ -23,6 +23,7 @@ from sentry_backend.ratelimit import limiter
 from sentry_backend.repository import agent_repo, camera_repo
 from sentry_backend.schemas.agent import (
     AgentCameraCreate,
+    AgentCameraUpdate,
     AgentPairRequest,
     AgentPairResult,
     AgentPublic,
@@ -194,6 +195,41 @@ async def agent_register_camera(
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()
     if cam.mediamtx_path and body.rtsp_url:
+        await live_provision.provision(
+            cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled, store_id=str(cam.store_id)
+        )
+    return CameraPublic.from_orm_camera(cam)
+
+
+@router.patch("/agent/cameras/{camera_id}", response_model=CameraPublic)
+async def agent_update_camera(
+    camera_id: UUID,
+    body: AgentCameraUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
+) -> CameraPublic:
+    """Edit a camera's connection (rtsp_url), display name, or risk threshold.
+
+    Used by the desktop agent's 'Засах' (edit) flow when a camera's IP or
+    credentials change — so the user can fix the connection without delete +
+    re-add (which would churn the UUID + mediamtx_path). When the rtsp_url
+    changes we re-provision the live worker so the AI pulls the new source.
+    """
+    cam = await camera_repo.get_camera_for_org(db, camera_id, agent.organization_id)
+    if cam is None or cam.store_id != agent.store_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")
+    rtsp_changed = body.rtsp_url is not None and body.rtsp_url != ""
+    cam = await camera_repo.update_camera(
+        db,
+        cam,
+        name=body.name,
+        rtsp_url=body.rtsp_url,
+        risk_threshold=body.risk_threshold,
+    )
+    await agent_repo.touch_last_seen(db, agent)
+    await db.commit()
+    # Re-point the live worker at the new source so the AI follows the edit.
+    if rtsp_changed and cam.mediamtx_path and body.rtsp_url:
         await live_provision.provision(
             cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled, store_id=str(cam.store_id)
         )

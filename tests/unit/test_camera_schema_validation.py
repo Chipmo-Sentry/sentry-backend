@@ -53,3 +53,41 @@ def test_auto_generated_slug_satisfies_pattern() -> None:
 
     for name in ["Front Door", "Касс №2", "  ", "Aisle-7!!!"]:
         assert re.match(MEDIAMTX_PATH_PATTERN, _slugify(name)), name
+
+
+# === AgentCameraUpdate — partial edit from the desktop agent ===
+
+
+def test_agent_camera_update_all_optional() -> None:
+    """An empty update is valid (no-op); every field defaults to None."""
+    from sentry_backend.schemas.agent import AgentCameraUpdate
+
+    u = AgentCameraUpdate()
+    assert u.name is None and u.rtsp_url is None and u.risk_threshold is None
+
+
+def test_agent_camera_update_accepts_partial() -> None:
+    from sentry_backend.schemas.agent import AgentCameraUpdate
+
+    u = AgentCameraUpdate(rtsp_url="rtsp://admin:pw@192.168.1.5:554/Streaming/Channels/101")
+    assert u.rtsp_url is not None and u.name is None
+
+
+def test_agent_camera_update_rejects_empty_name_and_url() -> None:
+    from sentry_backend.schemas.agent import AgentCameraUpdate
+
+    with pytest.raises(ValidationError):
+        AgentCameraUpdate(name="")
+    with pytest.raises(ValidationError):
+        AgentCameraUpdate(rtsp_url="")
+
+
+def test_agent_camera_update_risk_threshold_bounds() -> None:
+    from sentry_backend.schemas.agent import AgentCameraUpdate
+
+    AgentCameraUpdate(risk_threshold=0.0)
+    AgentCameraUpdate(risk_threshold=100.0)
+    with pytest.raises(ValidationError):
+        AgentCameraUpdate(risk_threshold=-1.0)
+    with pytest.raises(ValidationError):
+        AgentCameraUpdate(risk_threshold=101.0)

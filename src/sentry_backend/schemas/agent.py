@@ -56,6 +56,18 @@ class AgentCameraCreate(BaseModel):
     risk_threshold: float = 70.0
 
 
+class AgentCameraUpdate(BaseModel):
+    """Partial camera update from a paired agent (edit connection / settings).
+
+    All fields optional — only the provided ones change. mediamtx_path is NOT
+    editable here: it is the stream identity the live pipeline keys on, so the
+    agent edits the connection (rtsp_url) and name, never the path."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    rtsp_url: str | None = Field(default=None, min_length=1)
+    risk_threshold: float | None = Field(default=None, ge=0.0, le=100.0)
+
+
 class AgentStreamConfig(BaseModel):
     """Where the agent should publish its camera streams (cloud topology).
 
