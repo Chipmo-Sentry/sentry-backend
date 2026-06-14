@@ -26,7 +26,7 @@ class CameraCreate(BaseModel):
     # mediamtx_path is unique per Camera and drives the live-worker camera_id;
     # if None, backend auto-generates a slug from `name`.
     mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
-    risk_threshold: float = Field(default=70.0, ge=0.0)
+    risk_threshold: float = Field(default=50.0, ge=0.0, le=100.0)
 
 
 class CameraUpdate(BaseModel):
@@ -36,7 +36,7 @@ class CameraUpdate(BaseModel):
     stage2_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     enabled: bool | None = None
     mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
-    risk_threshold: float | None = Field(default=None, ge=0.0)
+    risk_threshold: float | None = Field(default=None, ge=0.0, le=100.0)
 
 
 class StreamTokenResponse(BaseModel):
@@ -59,7 +59,7 @@ class CameraPublic(BaseModel):
     created_at: datetime
     # L5 live-pipeline fields
     mediamtx_path: str | None = None
-    risk_threshold: float = 70.0
+    risk_threshold: float = 50.0
 
     @classmethod
     def from_orm_camera(cls, camera: Camera) -> "CameraPublic":

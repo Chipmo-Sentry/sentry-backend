@@ -10,16 +10,25 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sentry_backend.db.models.alert import AlertLevel
+from sentry_backend.db.models.alert import Alert, AlertLevel
+from sentry_backend.db.models.feedback import FeedbackVerdict
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.tenancy import get_current_organization_id
-from sentry_backend.repository import alert_repo
+from sentry_backend.repository import alert_repo, feedback_repo
 from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.services.alert_broker import get_broker
 
 router = APIRouter(prefix="/api/v1/alerts", tags=["alerts"])
 
 _SSE_KEEPALIVE_SEC = 15.0
+
+
+def _to_public(alert: Alert, verdict: FeedbackVerdict | None) -> AlertPublic:
+    """ORM Alert → AlertPublic with the staff verdict stitched in (it lives in a
+    separate feedback table, not on the alert row)."""
+    public = AlertPublic.model_validate(alert)
+    public.feedback_verdict = verdict
+    return public
 
 
 @router.get("", response_model=list[AlertPublic])
@@ -41,7 +50,8 @@ async def list_alerts(
         limit=limit,
         offset=offset,
     )
-    return [AlertPublic.model_validate(a) for a in alerts]
+    verdicts = await feedback_repo.latest_verdicts_for_alerts(db, [a.id for a in alerts])
+    return [_to_public(a, verdicts.get(a.id)) for a in alerts]
 
 
 @router.get("/stream")
@@ -90,4 +100,5 @@ async def get_alert(
     alert = await alert_repo.get_alert_for_org(db, alert_id, org_id)
     if alert is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сэрэмжлүүлэг олдсонгүй.")
-    return AlertPublic.model_validate(alert)
+    fb = await feedback_repo.get_latest_for_alert(db, alert_id)
+    return _to_public(alert, fb.verdict if fb else None)

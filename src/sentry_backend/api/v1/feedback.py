@@ -26,7 +26,9 @@ async def post_feedback(
     alert = await alert_repo.get_alert_for_org(db, body.alert_id, org_id)
     if alert is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сэрэмжлүүлэг олдсонгүй.")
-    fb = await feedback_repo.create_feedback(
+    # One verdict per (alert, user): re-submitting updates the existing row
+    # instead of stacking duplicates, so the UI shows a single settled answer.
+    fb, changed = await feedback_repo.upsert_feedback(
         db,
         alert_id=body.alert_id,
         user_id=user.id,
@@ -35,8 +37,9 @@ async def post_feedback(
     )
     # Close the RAG loop (docs/19 Phase 4): a staff-verified alert whose reasoning
     # the AI node already embedded becomes a retrievable case for this store — so
-    # future verifications get it as few-shot context. No re-embed needed.
-    if alert.embedding and alert.reasoning:
+    # future verifications get it as few-shot context. No re-embed needed. Only on
+    # a real new/changed decision — an idempotent re-submit must not spawn a dupe.
+    if changed and alert.embedding and alert.reasoning:
         await rag_case_repo.add_case(
             db,
             store_id=alert.store_id,

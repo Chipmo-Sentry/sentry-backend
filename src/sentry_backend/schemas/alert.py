@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from sentry_backend.db.models.alert import AlertCategory, AlertLevel, AlertTrigger
+from sentry_backend.db.models.feedback import FeedbackVerdict
 
 
 class AlertPublic(BaseModel):
@@ -31,6 +32,10 @@ class AlertPublic(BaseModel):
     # (first-fired order) + completed sequence rule keys. Labels via /behaviors.
     triggered_behaviors: list[str] | None = None
     triggered_sequences: list[str] | None = None
+    # Staff review verdict, if one has been given (true_positive / false_positive
+    # / unclear). None = not yet reviewed → the UI shows the verdict buttons; set
+    # = the UI shows the settled answer instead of re-asking.
+    feedback_verdict: FeedbackVerdict | None = None
 
 
 class AlertCreateInternal(BaseModel):
