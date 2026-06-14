@@ -1,5 +1,6 @@
 """Alert CRUD."""
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -63,6 +64,7 @@ async def create_alert(
     peak_risk_pct: float | None = None,
     triggered_behaviors: list[str] | None = None,
     triggered_sequences: list[str] | None = None,
+    triggered_behavior_detail: list[dict[str, Any]] | None = None,
     embedding: list[float] | None = None,
 ) -> Alert:
     alert = Alert(
@@ -81,6 +83,7 @@ async def create_alert(
         peak_risk_pct=peak_risk_pct,
         triggered_behaviors=triggered_behaviors,
         triggered_sequences=triggered_sequences,
+        triggered_behavior_detail=triggered_behavior_detail,
         embedding=embedding,
     )
     db.add(alert)

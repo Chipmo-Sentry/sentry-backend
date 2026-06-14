@@ -73,6 +73,10 @@ class _PersonState:
     # epoch ms). Both stored on the Alert and used to size the breach clip so
     # it covers the WHOLE episode, not a fixed [-5s, +10s].
     last_behaviors: list[str] = field(default_factory=list)
+    # Latest non-empty per-criterion banked score + seconds-from-episode-start,
+    # carried into the breach to build the alert's behaviour timeline.
+    last_behavior_scores: dict[str, float] = field(default_factory=dict)
+    last_behavior_offsets: dict[str, float] = field(default_factory=dict)
     episode_started_ms: int | None = None
 
 
@@ -149,6 +153,12 @@ class ThresholdHandler:
                 behs = t.get("behaviors")
                 if isinstance(behs, list) and behs:
                     st.last_behaviors = [str(b) for b in behs]
+                scores = t.get("behavior_scores")
+                if isinstance(scores, dict) and scores:
+                    st.last_behavior_scores = {str(k): float(v) for k, v in scores.items()}
+                offsets = t.get("behavior_offsets")
+                if isinstance(offsets, dict) and offsets:
+                    st.last_behavior_offsets = {str(k): float(v) for k, v in offsets.items()}
                 ep_ms = t.get("episode_started_ms")
                 if isinstance(ep_ms, int) and ep_ms > 0:
                     st.episode_started_ms = ep_ms
@@ -171,6 +181,9 @@ class ThresholdHandler:
                         peak = st.peak_risk_pct
                         sequences = list(st.last_sequences)
                         behaviors = list(st.last_behaviors)
+                        behavior_detail = build_behavior_detail(
+                            behaviors, st.last_behavior_scores, st.last_behavior_offsets
+                        )
                         # Node-clock anchor for the clip window: the breaching
                         # frame's capture ts (same clock as episode_started_ms).
                         frame_ts = frame.get("ts_ms")
@@ -192,6 +205,7 @@ class ThresholdHandler:
                                 key,
                                 sequences,
                                 behaviors=behaviors,
+                                behavior_detail=behavior_detail,
                                 episode_started_ms=episode_ms,
                                 breach_ts_ms=breach_ts_ms,
                             )
@@ -225,6 +239,7 @@ class ThresholdHandler:
         sequences: list[str] | None = None,
         *,
         behaviors: list[str] | None = None,
+        behavior_detail: list[dict[str, Any]] | None = None,
         episode_started_ms: int | None = None,
         breach_ts_ms: int | None = None,
     ) -> None:
@@ -235,6 +250,7 @@ class ThresholdHandler:
                 peak_risk_pct,
                 sequences,
                 behaviors=behaviors,
+                behavior_detail=behavior_detail,
                 episode_started_ms=episode_started_ms,
                 breach_ts_ms=breach_ts_ms,
             )
@@ -256,6 +272,7 @@ class ThresholdHandler:
         sequences: list[str] | None = None,
         *,
         behaviors: list[str] | None = None,
+        behavior_detail: list[dict[str, Any]] | None = None,
         episode_started_ms: int | None = None,
         breach_ts_ms: int | None = None,
     ) -> None:
@@ -458,6 +475,7 @@ class ThresholdHandler:
                 peak_risk_pct=peak_risk_pct,
                 triggered_behaviors=behaviors or None,
                 triggered_sequences=sequences or None,
+                triggered_behavior_detail=behavior_detail or None,
                 embedding=embedding,
             )
             alert_public = AlertPublic.model_validate(alert)
@@ -482,6 +500,27 @@ class ThresholdHandler:
 
 
 # === Helpers ===
+
+
+def build_behavior_detail(
+    behaviors: list[str],
+    scores: dict[str, float],
+    offsets: dict[str, float],
+) -> list[dict[str, Any]]:
+    """Per-criterion timeline rows for the alert detail, in first-fired order.
+
+    Each row = {key, offset_sec, score}. Keys follow the node's first-fired
+    order (`behaviors`); score/offset are looked up from the banked ledgers
+    (0.0 if a key is somehow absent). Empty list when nothing fired.
+    """
+    return [
+        {
+            "key": key,
+            "offset_sec": round(float(offsets.get(key, 0.0)), 1),
+            "score": round(float(scores.get(key, 0.0)), 1),
+        }
+        for key in behaviors
+    ]
 
 
 def compute_clip_window(

@@ -2,7 +2,30 @@
 
 from __future__ import annotations
 
-from sentry_backend.services.threshold_handler import compute_clip_window
+from sentry_backend.services.threshold_handler import (
+    build_behavior_detail,
+    compute_clip_window,
+)
+
+
+def test_build_behavior_detail_orders_and_looks_up() -> None:
+    rows = build_behavior_detail(
+        ["looking_around", "item_pickup", "concealment"],
+        {"looking_around": 4.0, "item_pickup": 10.0, "concealment": 15.0},
+        {"looking_around": 0.0, "item_pickup": 3.2, "concealment": 7.8},
+    )
+    assert rows == [
+        {"key": "looking_around", "offset_sec": 0.0, "score": 4.0},
+        {"key": "item_pickup", "offset_sec": 3.2, "score": 10.0},
+        {"key": "concealment", "offset_sec": 7.8, "score": 15.0},
+    ]
+
+
+def test_build_behavior_detail_defaults_missing_and_empty() -> None:
+    # A key present in the order but absent from the ledgers → 0.0, not a crash.
+    assert build_behavior_detail(["x"], {}, {}) == [{"key": "x", "offset_sec": 0.0, "score": 0.0}]
+    assert build_behavior_detail([], {"a": 1.0}, {"a": 1.0}) == []
+
 
 _DEFAULTS = {"pre_pad_sec": 3, "post_roll_sec": 10.0, "max_sec": 90}
 

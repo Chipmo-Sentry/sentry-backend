@@ -1,9 +1,11 @@
 """Alert — AI verdict on a clip."""
 
 import enum
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import ARRAY, Enum, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -87,6 +89,13 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # keys; Mongolian labels come from /api/v1/behaviors (label_mn).
     triggered_behaviors: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)
     triggered_sequences: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)
+    # Per-criterion timeline for the alert detail: list of
+    # {key, offset_sec, score} in first-fired order (offset = seconds from the
+    # episode's first firing). Richer than triggered_behaviors (keys only);
+    # nullable so older alerts / manual uploads simply have none.
+    triggered_behavior_detail: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     # Embedding of `reasoning` computed by the AI node at verify time (docs/19
     # Phase 4 RAG). Lets staff feedback create a verified_case for retrieval
     # WITHOUT a second embed round-trip. Null on live-threshold alerts.

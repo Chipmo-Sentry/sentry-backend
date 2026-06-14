@@ -178,6 +178,10 @@ class LiveTrack(BaseModel):
     # banked score, Mongolian display strings, and when the episode opened.
     behaviors: list[str] = Field(default_factory=list)
     behavior_scores: dict[str, float] = Field(default_factory=dict)
+    # Seconds from episode start to each criterion's first firing. Carried here
+    # (not just for the overlay) so the threshold handler can bank it onto the
+    # alert for the detail-page timeline — extra="ignore" would strip it.
+    behavior_offsets: dict[str, float] = Field(default_factory=dict)
     reasons: list[str] = Field(default_factory=list)
     episode_started_ms: int | None = None
     # Cross-camera re-ID (ADR-0023)
