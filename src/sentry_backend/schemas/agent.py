@@ -53,7 +53,7 @@ class AgentCameraCreate(BaseModel):
     # Agent-supplied, so validate it the same way as the user-facing schema —
     # it reaches the recordings filesystem path and the MediaMTX control API.
     mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
-    risk_threshold: float = 70.0
+    risk_threshold: float = Field(default=50.0, ge=0.0, le=100.0)
 
 
 class AgentCameraUpdate(BaseModel):

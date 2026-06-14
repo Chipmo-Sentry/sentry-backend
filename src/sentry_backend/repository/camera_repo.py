@@ -56,7 +56,7 @@ async def create_camera(
     stage2_threshold: float,
     enabled: bool,
     mediamtx_path: str | None = None,
-    risk_threshold: float = 70.0,
+    risk_threshold: float = 50.0,
 ) -> Camera | None:
     """Return None if the store doesn't belong to the org (404 surfaced by caller).
 

@@ -125,7 +125,7 @@ class ThresholdHandler:
 
         now = time.monotonic()
         # ADR-0022: risk_pct is normalized 0-100. A breach is risk_pct crossing
-        # the per-camera risk_threshold (default 70), sustained for N seconds.
+        # the per-camera risk_threshold (default 50), sustained for N seconds.
         # Every breach is then VLM-confirmed before any alert/notification fires.
 
         async with self._lock:
@@ -168,7 +168,7 @@ class ThresholdHandler:
                     continue
 
                 # Breach when the normalized risk_pct (0-100, ADR-0022) crosses
-                # this camera's tunable threshold (default 70). `color` is kept
+                # this camera's tunable threshold (default 50). `color` is kept
                 # only for the live overlay.
                 if st.risk_pct >= camera.risk_threshold:
                     if st.above_threshold_since is None:
