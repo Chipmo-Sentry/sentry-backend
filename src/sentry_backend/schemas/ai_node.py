@@ -82,6 +82,25 @@ def parse_camera_health(telemetry: str | None) -> list[CameraHealth] | None:
         return None
 
 
+class ComponentUsage(BaseModel):
+    """Per-component CPU/RAM (sentry-ai / Ollama / MediaMTX / Tunnel) — the
+    resource breakdown shown in the dashboard. Stored in telemetry JSON."""
+
+    name: str = Field(max_length=32)
+    cpu_pct: float | None = Field(default=None, ge=0)
+    ram_mb: int | None = Field(default=None, ge=0)
+
+
+class VlmStatus(BaseModel):
+    """Whether a VLM model is resident in Ollama + its GPU split, so the dashboard
+    can show the VLM's real GPU/VRAM footprint (per-process VRAM isn't on WDDM)."""
+
+    loaded: bool
+    model: str | None = Field(default=None, max_length=64)
+    vram_mb: int | None = Field(default=None, ge=0)
+    gpu_pct: int | None = Field(default=None, ge=0, le=100)
+
+
 class AiNodeHeartbeat(BaseModel):
     """Telemetry the node reports every ~60s."""
 
@@ -112,6 +131,10 @@ class AiNodeHeartbeat(BaseModel):
     # send it. Stored inside `ai_nodes.telemetry` JSON with the rest of the body
     # (no new table/migration); length-capped to keep that Text column bounded.
     cameras: list[CameraHealth] | None = Field(default=None, max_length=64)
+    # Resource breakdown (per-component CPU/RAM) + VLM GPU residency, shown in the
+    # dashboard's expanded metrics panel. Stored in telemetry JSON.
+    components: list[ComponentUsage] | None = Field(default=None, max_length=12)
+    vlm: VlmStatus | None = None
     # Central-control feedback (ADR-0026): the VLM provider the node ACTUALLY uses
     # (effective), whether its model is reachable, and an error if not. Lets the
     # dashboard show applied-on-server vs applying vs error next to the desired
