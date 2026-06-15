@@ -1,5 +1,6 @@
 """Internal endpoints — service-to-service (e.g. sentry-ai → backend)."""
 
+import base64
 import hmac
 from typing import Annotated, Literal
 from urllib.parse import parse_qs
@@ -14,14 +15,14 @@ from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
 from sentry_backend.repository import ai_node_repo, alert_repo, rag_case_repo
-from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic
+from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic, LiveAlertCreate
 from sentry_backend.schemas.rag import RagCaseCreate, RagCaseMatch, RagSimilarRequest
 from sentry_backend.security import decode_user_token
 from sentry_backend.services import alert_notify, event_log
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.live_broker import get_live_broker
-from sentry_backend.services.threshold_handler import get_threshold_handler
+from sentry_backend.services.threshold_handler import create_live_alert, get_threshold_handler
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/internal", tags=["internal"])
@@ -179,6 +180,57 @@ async def create_alert_from_ai(
     )
 
     return AlertPublic.model_validate(alert)
+
+
+@router.post("/live-alert", response_model=AlertPublic, status_code=status.HTTP_201_CREATED)
+async def create_live_alert_from_node(
+    body: LiveAlertCreate,
+    service_name: Annotated[str, Depends(require_service_token)],
+) -> AlertPublic:
+    """Node-push live alert. The AI node detected the breach, cut + VLM-verified
+    the clip locally, and POSTs the finished result here (outbound — reliable,
+    unlike the old cloud→node /v1/cut-verify pull). camera_id = mediamtx_path."""
+    if service_name != "sentry-ai":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Service '{service_name}' not authorized for this endpoint",
+        )
+    try:
+        clip_bytes = base64.b64decode(body.clip_b64)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="clip_b64 буруу байна."
+        ) from e
+
+    detail = (
+        [d.model_dump() for d in body.triggered_behavior_detail]
+        if body.triggered_behavior_detail
+        else None
+    )
+    alert = await create_live_alert(
+        mediamtx_path=body.camera_id,
+        clip_bytes=clip_bytes,
+        category=body.category,
+        confidence=body.confidence,
+        reasoning=body.reasoning,
+        model_name=body.model_name,
+        inference_latency_ms=body.inference_latency_ms,
+        duration_sec_clip=body.duration_sec_clip,
+        captured_at=body.captured_at,
+        file_size_bytes=body.file_size_bytes,
+        embedding=body.embedding,
+        person_id=body.person_id,
+        peak_risk_pct=body.peak_risk_pct,
+        behaviors=body.triggered_behaviors,
+        sequences=body.triggered_sequences,
+        behavior_detail=detail,
+    )
+    if alert is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Камер олдсонгүй эсвэл клип хадгалж чадсангүй.",
+        )
+    return alert
 
 
 # ===== M1-LIVE L3: live metadata fanout =====

@@ -204,6 +204,13 @@ class ThresholdHandler:
                 if isinstance(ep_ms, int) and ep_ms > 0:
                     st.episode_started_ms = ep_ms
 
+                # Node-push topology: the node detects breaches + cuts/verifies +
+                # pushes the finished alert itself. The backend only tracks risk
+                # (above) and writes episode summaries (on prune) — it must NOT
+                # also pull /v1/cut-verify, or we'd double-handle every breach.
+                if settings.live_alerts_via_node_push:
+                    continue
+
                 # Cooldown still active → don't fire
                 if now - st.last_breach_ts < settings.live_breach_cooldown_sec:
                     continue
@@ -728,6 +735,132 @@ async def _resolve_camera_by_mediamtx_path(path: str) -> Camera | None:
     async with session_scope() as db:
         result = await db.execute(select(Camera).where(Camera.mediamtx_path == path))
         return result.scalar_one_or_none()
+
+
+_LIVE_ALERT_SEVERITY = {
+    AlertLevel.ignore: EventSeverity.info,
+    AlertLevel.log: EventSeverity.info,
+    AlertLevel.notify: EventSeverity.warning,
+    AlertLevel.review: EventSeverity.critical,
+}
+
+
+async def create_live_alert(
+    *,
+    mediamtx_path: str,
+    clip_bytes: bytes,
+    category: AlertCategory,
+    confidence: float,
+    reasoning: str,
+    model_name: str,
+    inference_latency_ms: int,
+    duration_sec_clip: float,
+    captured_at: datetime,
+    file_size_bytes: int,
+    embedding: list[float] | None = None,
+    person_id: int | None = None,
+    peak_risk_pct: float | None = None,
+    behaviors: list[str] | None = None,
+    sequences: list[str] | None = None,
+    behavior_detail: list[dict[str, Any]] | None = None,
+) -> AlertPublic | None:
+    """Node-push path: the AI node detected the breach, cut + VLM-verified the
+    clip LOCALLY, and POSTed the finished result here (outbound = reliable,
+    unlike the old cloud→node pull). We persist the clip, create the
+    live_threshold Alert, notify, publish SSE, and log. None if the camera is
+    unknown or the clip is rejected. The node has already applied the VLM gate
+    (it never pushes an "ignore" verdict)."""
+    settings = get_settings()
+    camera = await _resolve_camera_by_mediamtx_path(mediamtx_path)
+    if camera is None:
+        log.warning("live_alert.camera_unknown", mediamtx_path=mediamtx_path)
+        return None
+
+    max_bytes = settings.max_clip_size_mb * 1024 * 1024
+    if len(clip_bytes) > max_bytes:
+        log.error("live_alert.clip_too_large", decoded_bytes=len(clip_bytes), max_bytes=max_bytes)
+        return None
+    out_dir = Path(settings.clip_storage_dir).resolve()  # noqa: ASYNC240
+    out_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+    out_path = out_dir / f"live_{uuid4().hex}.mp4"
+    out_path.write_bytes(clip_bytes)  # noqa: ASYNC230
+    sha_hex = hashlib.sha256(clip_bytes).hexdigest()
+
+    alert_public: AlertPublic | None = None
+    async with session_scope() as db:
+        cam_loaded = await db.get(Camera, camera.id)
+        if cam_loaded is None:
+            return None
+        store = await db.get(Store, cam_loaded.store_id)
+        if store is None:
+            return None
+        org_id = store.organization_id
+        clip = Clip(
+            organization_id=org_id,
+            store_id=cam_loaded.store_id,
+            camera_id=cam_loaded.id,
+            captured_at=captured_at,
+            duration_sec=duration_sec_clip,
+            storage_path=out_path.as_posix(),
+            file_size_bytes=file_size_bytes,
+            sha256=sha_hex,
+        )
+        db.add(clip)
+        await db.flush()
+        level = derive_alert_level(category, confidence)
+        alert = await alert_repo.create_alert(
+            db,
+            clip_id=clip.id,
+            organization_id=org_id,
+            store_id=cam_loaded.store_id,
+            camera_id=cam_loaded.id,
+            category=category,
+            confidence=confidence,
+            reasoning=reasoning,
+            model_name=model_name,
+            alert_level=level,
+            inference_latency_ms=inference_latency_ms,
+            triggered_by=AlertTrigger.live_threshold,
+            person_id=person_id,
+            peak_risk_pct=peak_risk_pct,
+            triggered_behaviors=behaviors or None,
+            triggered_sequences=sequences or None,
+            triggered_behavior_detail=behavior_detail or None,
+            embedding=embedding,
+        )
+        alert_public = AlertPublic.model_validate(alert)
+        await alert_notify.notify_alert(db, alert)
+        await event_log.emit(
+            db,
+            event_type=EventType.alert_created,
+            severity=_LIVE_ALERT_SEVERITY.get(level, EventSeverity.warning),
+            message=f"Сэжигтэй үйлдэл илрлээ: {category.value} ({confidence:.0%})",
+            organization_id=org_id,
+            store_id=cam_loaded.store_id,
+            camera_id=cam_loaded.id,
+            actor_label="AI",
+            detail={
+                "alert_id": str(alert.id),
+                "category": category.value,
+                "confidence": confidence,
+                "alert_level": level.value,
+                "model_name": model_name,
+                "person_id": person_id,
+                "peak_risk_pct": peak_risk_pct,
+            },
+        )
+
+    if alert_public is not None:
+        await get_broker().publish(
+            alert_public.organization_id, alert_public.model_dump(mode="json")
+        )
+        log.info(
+            "live_alert.created",
+            alert_id=str(alert_public.id),
+            mediamtx_path=mediamtx_path,
+            person_id=person_id,
+        )
+    return alert_public
 
 
 # === Singleton ===

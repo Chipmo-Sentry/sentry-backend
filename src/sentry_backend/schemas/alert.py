@@ -59,3 +59,31 @@ class AlertCreateInternal(BaseModel):
     reasoning: str = Field(min_length=1, max_length=2000)
     model_name: str = Field(min_length=1, max_length=64)
     inference_latency_ms: int = Field(ge=0)
+
+
+class LiveAlertCreate(BaseModel):
+    """POST /api/v1/internal/live-alert — node-push path (ADR live-alert).
+
+    The AI node detected a sustained risk breach, cut the clip + ran VLM
+    LOCALLY, and posts the finished alert here (outbound, reliable). camera_id
+    is the Camera.mediamtx_path; the backend resolves org/store. The node only
+    posts non-ignore verdicts (it applies the VLM gate itself)."""
+
+    camera_id: str = Field(min_length=1)  # Camera.mediamtx_path
+    category: AlertCategory
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str = Field(min_length=1, max_length=2000)
+    model_name: str = Field(min_length=1, max_length=64)
+    inference_latency_ms: int = Field(ge=0)
+    # Clip (base64-encoded mp4 the node cut from its local recordings).
+    clip_b64: str = Field(min_length=1)
+    file_size_bytes: int = Field(ge=0)
+    duration_sec_clip: float = Field(ge=0.0)
+    captured_at: datetime
+    embedding: list[float] | None = None
+    # Live episode context.
+    person_id: int | None = None
+    peak_risk_pct: float | None = None
+    triggered_behaviors: list[str] | None = None
+    triggered_sequences: list[str] | None = None
+    triggered_behavior_detail: list[BehaviorDetailItem] | None = None

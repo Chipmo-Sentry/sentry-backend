@@ -161,6 +161,13 @@ class Settings(BaseSettings):
     # `Authorization: Bearer` header to the authHTTP endpoint (enforce-if-set).
     stream_token_ttl_sec: int = 3600
     mediamtx_auth_secret: str | None = None
+    # Node-push topology: the AI node detects the breach, cuts + VLM-verifies
+    # LOCALLY, and POSTs the finished alert to /api/v1/internal/live-alert
+    # (outbound, reliable). When True the backend's threshold_handler only
+    # TRACKS risk + writes episode summaries — it does NOT pull the node's
+    # /v1/cut-verify (that fragile cloud→node path is retired). Set False to
+    # fall back to the legacy backend-pull breach handling.
+    live_alerts_via_node_push: bool = True
     # Per-person cooldown after a live-threshold breach fires — debounces
     # repeated alerts from the same suspicious moment.
     live_breach_cooldown_sec: int = 30
