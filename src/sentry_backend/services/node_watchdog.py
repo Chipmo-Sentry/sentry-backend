@@ -176,7 +176,7 @@ def _format_recovered(node: NodeLike) -> str:
 def _format_camera_down(node: NodeLike, cam: CameraHealth) -> str:
     fps_txt = "?" if cam.fps is None else f"{cam.fps:g}"
     return (
-        f"🟡 Камер унасан: {cam.camera_id} (node {_node_label(node)})\n"
+        f"🟡 Камер тасарлаа: {cam.camera_id} (node {_node_label(node)})\n"
         f"⚠️ Төлөв: {cam.status}, FPS: {fps_txt}"
     )
 
@@ -412,7 +412,7 @@ class NodeWatchdog:
                     else EventType.camera_stream_recovered,
                     severity=EventSeverity.warning if down else EventSeverity.success,
                     message=(
-                        f"Камер унаслаа: {cam_name}" if down else f"Камер сэргэлээ: {cam_name}"
+                        f"Камер тасарлаа: {cam_name}" if down else f"Камер сэргэлээ: {cam_name}"
                     ),
                     organization_id=org_id,
                     camera_id=camera_id,
