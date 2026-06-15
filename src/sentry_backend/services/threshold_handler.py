@@ -251,7 +251,9 @@ class ThresholdHandler:
                                 else int(time.time() * 1000)
                             )
                             episode_ms = st.episode_started_ms
-                            st.alerted = True
+                            # NB: st.alerted is set only when the alert is really
+                            # created (in _handle_breach_inner), not here — the
+                            # cut/VLM can still fail, in which case no alert exists.
                             self._inflight.add(key)
                             asyncio.create_task(
                                 self._handle_breach(
@@ -654,6 +656,12 @@ class ThresholdHandler:
                 category=str(category),
                 level=str(level),
             )
+            # Mark the person's episode as alerted ONLY now that the alert truly
+            # exists — so the episode summary's "сэрэмжлүүлэг үүссэн" is honest.
+            async with self._lock:
+                st = self._state.get((cam_path, person_id))
+                if st is not None:
+                    st.alerted = True
 
 
 # === Helpers ===
