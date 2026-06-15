@@ -41,6 +41,8 @@ class Camera(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
     )
     # Risk threshold (0-100); when a tracked person crosses this in live mode,
-    # we cut a clip + run VLM verify. Default 50 (CRITICAL band) — pilots found
-    # 70 too high to alert on real concealment; per-camera tunable in the web UI.
-    risk_threshold: Mapped[float] = mapped_column(Float, default=50.0, nullable=False)
+    # we cut a clip + run VLM verify. Default 11 = the yellow band — cast a wide
+    # net and let the VLM filter (it drops "browsing" → ignore), so anything that
+    # turns yellow/red on the live view gets checked. Per-camera tunable in the
+    # web UI; raise it if a busy camera generates too much VLM load.
+    risk_threshold: Mapped[float] = mapped_column(Float, default=11.0, nullable=False)

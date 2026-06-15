@@ -204,11 +204,6 @@ class ThresholdHandler:
                 if isinstance(ep_ms, int) and ep_ms > 0:
                     st.episode_started_ms = ep_ms
 
-                # Alerts need the AI node to cut+verify; without it we still
-                # tracked everything above (→ episode summary on prune).
-                if not l5_enabled:
-                    continue
-
                 # Cooldown still active → don't fire
                 if now - st.last_breach_ts < settings.live_breach_cooldown_sec:
                     continue
@@ -223,40 +218,54 @@ class ThresholdHandler:
                         now - st.above_threshold_since >= settings.live_breach_sustain_sec
                         and key not in self._inflight
                     ):
-                        # Confirmed sustained breach
+                        # Confirmed sustained breach.
                         peak = st.peak_risk_pct
-                        sequences = list(st.last_sequences)
-                        behaviors = list(st.last_behaviors)
-                        behavior_detail = build_behavior_detail(
-                            behaviors, st.last_behavior_scores, st.last_behavior_offsets
-                        )
-                        # Node-clock anchor for the clip window: the breaching
-                        # frame's capture ts (same clock as episode_started_ms).
-                        frame_ts = frame.get("ts_ms")
-                        breach_ts_ms = (
-                            frame_ts
-                            if isinstance(frame_ts, int) and frame_ts > 0
-                            else int(time.time() * 1000)
-                        )
-                        episode_ms = st.episode_started_ms
-                        st.last_breach_ts = now
+                        st.last_breach_ts = now  # throttle (also throttles the diag below)
                         st.above_threshold_since = None
                         st.peak_risk_pct = 0.0
-                        st.alerted = True
-                        self._inflight.add(key)
-                        asyncio.create_task(
-                            self._handle_breach(
-                                camera,
-                                pid,
-                                peak,
-                                key,
-                                sequences,
-                                behaviors=behaviors,
-                                behavior_detail=behavior_detail,
-                                episode_started_ms=episode_ms,
-                                breach_ts_ms=breach_ts_ms,
+                        if not l5_enabled:
+                            # Breach-worthy but no AI node to cut/verify → say so
+                            # in the log so the operator sees WHY no alert appears,
+                            # instead of silent nothing.
+                            asyncio.create_task(
+                                self._emit_alert_blocked(
+                                    camera,
+                                    pid,
+                                    peak,
+                                    "AI node тохируулаагүй тул сэрэмжлүүлэг үүсгэх "
+                                    "боломжгүй (SENTRY_AI_URL).",
+                                )
                             )
-                        )
+                        else:
+                            sequences = list(st.last_sequences)
+                            behaviors = list(st.last_behaviors)
+                            behavior_detail = build_behavior_detail(
+                                behaviors, st.last_behavior_scores, st.last_behavior_offsets
+                            )
+                            # Node-clock anchor for the clip window: the breaching
+                            # frame's capture ts (same clock as episode_started_ms).
+                            frame_ts = frame.get("ts_ms")
+                            breach_ts_ms = (
+                                frame_ts
+                                if isinstance(frame_ts, int) and frame_ts > 0
+                                else int(time.time() * 1000)
+                            )
+                            episode_ms = st.episode_started_ms
+                            st.alerted = True
+                            self._inflight.add(key)
+                            asyncio.create_task(
+                                self._handle_breach(
+                                    camera,
+                                    pid,
+                                    peak,
+                                    key,
+                                    sequences,
+                                    behaviors=behaviors,
+                                    behavior_detail=behavior_detail,
+                                    episode_started_ms=episode_ms,
+                                    breach_ts_ms=breach_ts_ms,
+                                )
+                            )
                 else:
                     st.above_threshold_since = None
 
@@ -344,6 +353,30 @@ class ThresholdHandler:
                 )
         except Exception:  # noqa: BLE001 — summary logging must never disrupt L5
             log.warning("threshold_handler.episode_summary_failed", exc_info=True)
+
+    async def _emit_alert_blocked(
+        self, camera: Camera, person_id: int, peak: float, reason: str
+    ) -> None:
+        """Activity-log row explaining why a sustained breach produced NO alert
+        (#3 diagnosis): the operator sees the exact gate that blocked it instead
+        of silent nothing."""
+        try:
+            async with session_scope() as db:
+                store = await db.get(Store, camera.store_id)
+                org_id = store.organization_id if store else None
+                await event_log.emit(
+                    db,
+                    event_type=EventType.error,
+                    severity=EventSeverity.warning,
+                    message=f"Объект {camera.name}: эрсдэл {peak:.0f}% давсан — {reason}",
+                    organization_id=org_id,
+                    store_id=camera.store_id,
+                    camera_id=camera.id,
+                    actor_label="AI",
+                    detail={"person_id": person_id, "peak_risk_pct": round(peak, 1)},
+                )
+        except Exception:  # noqa: BLE001
+            log.warning("threshold_handler.alert_blocked_emit_failed", exc_info=True)
 
     async def _handle_breach(
         self,
@@ -456,12 +489,21 @@ class ThresholdHandler:
                 )
         except httpx.HTTPError as e:
             log.warning("threshold_handler.cutverify_http_err", error=str(e))
+            await self._emit_alert_blocked(
+                camera, person_id, peak_risk_pct, "AI node-той холбогдож чадсангүй"
+            )
             return
         if resp.status_code != 200:
             log.warning(
                 "threshold_handler.cutverify_non_200",
                 status=resp.status_code,
                 body=resp.text[:200],
+            )
+            await self._emit_alert_blocked(
+                camera,
+                person_id,
+                peak_risk_pct,
+                f"Clip огтлох/баталгаажуулах амжилтгүй (HTTP {resp.status_code})",
             )
             return
         data: dict[str, Any] = resp.json()
