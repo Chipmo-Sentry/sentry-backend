@@ -55,6 +55,9 @@ class EventType(enum.StrEnum):
     node_heartbeat = "node_heartbeat"
     # --- detection ---
     alert_created = "alert_created"
+    # A person's live episode ended — peak risk + which behaviours fired, even
+    # when it never crossed the alert threshold (visibility into live scoring).
+    risk_episode = "risk_episode"
     # --- generic ---
     error = "error"
 

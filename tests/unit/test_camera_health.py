@@ -270,7 +270,7 @@ def test_camera_down_message() -> None:
     node = FakeNode(telemetry=None)
     cam = CameraHealth(camera_id="cam-7", fps=0.0, status="error")
     msg = _format_camera_down(node, cam)
-    assert "🟡 Камер унасан: cam-7" in msg
+    assert "🟡 Камер тасарлаа: cam-7" in msg
     assert "Predator-ChipmoAI" in msg
     assert "error" in msg
     assert "FPS: 0" in msg

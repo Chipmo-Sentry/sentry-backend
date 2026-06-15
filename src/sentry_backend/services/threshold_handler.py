@@ -37,12 +37,13 @@ from sqlalchemy import select
 from sentry_backend.db.models.alert import AlertCategory, AlertLevel, AlertTrigger
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.clip import Clip
+from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.db.models.store import Store
 from sentry_backend.db.session import session_scope
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import alert_repo
 from sentry_backend.schemas.alert import AlertPublic
-from sentry_backend.services import alert_notify
+from sentry_backend.services import alert_notify, event_log
 from sentry_backend.services.ai_service import build_live_rag_query
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
@@ -57,11 +58,50 @@ log = get_logger("sentry_backend.threshold_handler")
 _STATE_TTL_SEC = 300.0
 _CLEANUP_EVERY_SEC = 60.0
 
+# Only log an episode summary if the person reached at least the yellow band
+# (>10) — green-only passers-by would flood the activity log otherwise.
+_EPISODE_LOG_MIN_PCT = 10.0
+
+# Risk-level bands, mirroring the behaviour engine (sentry-ai behavior.py).
+_LEVEL_LOW_MAX = 10.0
+_LEVEL_MEDIUM_MAX = 25.0
+_LEVEL_HIGH_MAX = 50.0
+
+
+def _risk_level(pct: float) -> str:
+    if pct <= _LEVEL_LOW_MAX:
+        return "LOW"
+    if pct <= _LEVEL_MEDIUM_MAX:
+        return "MEDIUM"
+    if pct <= _LEVEL_HIGH_MAX:
+        return "HIGH"
+    return "CRITICAL"
+
+
+@dataclass(slots=True)
+class _EpisodeSummary:
+    """A finished live episode worth recording on the activity log."""
+
+    cam_path: str
+    person_id: int
+    peak_risk_pct: float
+    behaviors: list[str]
+    behavior_scores: dict[str, float]
+    alerted: bool
+    duration_sec: float
+
 
 @dataclass(slots=True)
 class _PersonState:
     risk_pct: float = 0.0
     peak_risk_pct: float = 0.0
+    # Lifetime peak for this track — UNLIKE peak_risk_pct it is never reset by a
+    # breach, so the episode-summary row (emitted on prune) reports the true high
+    # water mark. first_seen anchors the episode duration; alerted records
+    # whether this episode produced an Alert (so the summary can say so).
+    episode_peak_risk_pct: float = 0.0
+    first_seen: float = 0.0
+    alerted: bool = False
     above_threshold_since: float | None = None  # monotonic ts when we first crossed
     last_breach_ts: float = 0.0  # cooldown anchor
     last_seen: float = 0.0  # monotonic ts of last frame
@@ -102,14 +142,13 @@ class ThresholdHandler:
 
     async def _on_frame_inner(self, frame: dict[str, Any]) -> None:
         settings = get_settings()
-        # L5 enable-gate. The breach clip is cut + VLM-verified ON THE AI NODE
+        # L5 alert-gate. The breach clip is cut + VLM-verified ON THE AI NODE
         # (POST {sentry_ai_url}/v1/cut-verify — see _handle_breach_inner), because
         # in the split/Railway topology the backend can't read the node's MediaMTX
-        # recordings. So L5 is available whenever the AI node is configured — NOT
-        # when a local recordings dir exists (that gated the obsolete local-cut
-        # path and wrongly disabled L5 on Railway, where alerts never fired).
-        if not settings.sentry_ai_url:
-            return  # no AI node to cut/verify the breach → L5 disabled
+        # recordings. So ALERTS require the AI node to be configured. We still
+        # TRACK per-person risk + write episode summaries (#2) without it — that
+        # only needs the live metadata, which already flows (the overlay works).
+        l5_enabled = bool(settings.sentry_ai_url)
 
         cam_path = frame.get("camera_id")
         if not isinstance(cam_path, str):
@@ -129,7 +168,7 @@ class ThresholdHandler:
         # Every breach is then VLM-confirmed before any alert/notification fires.
 
         async with self._lock:
-            self._maybe_cleanup(now)
+            episode_summaries = self._maybe_cleanup(now)
             for t in tracks:
                 pid = t.get("person_id")
                 risk = t.get("risk_pct")
@@ -139,9 +178,11 @@ class ThresholdHandler:
                 st = self._state.get(key)
                 if st is None:
                     st = _PersonState()
+                    st.first_seen = now
                     self._state[key] = st
                 st.risk_pct = float(risk)
                 st.peak_risk_pct = max(st.peak_risk_pct, st.risk_pct)
+                st.episode_peak_risk_pct = max(st.episode_peak_risk_pct, st.risk_pct)
                 st.last_seen = now
                 # Remember the latest fired sequence rules (RAG query context).
                 seqs = t.get("sequences")
@@ -162,6 +203,11 @@ class ThresholdHandler:
                 ep_ms = t.get("episode_started_ms")
                 if isinstance(ep_ms, int) and ep_ms > 0:
                     st.episode_started_ms = ep_ms
+
+                # Alerts need the AI node to cut+verify; without it we still
+                # tracked everything above (→ episode summary on prune).
+                if not l5_enabled:
+                    continue
 
                 # Cooldown still active → don't fire
                 if now - st.last_breach_ts < settings.live_breach_cooldown_sec:
@@ -196,6 +242,7 @@ class ThresholdHandler:
                         st.last_breach_ts = now
                         st.above_threshold_since = None
                         st.peak_risk_pct = 0.0
+                        st.alerted = True
                         self._inflight.add(key)
                         asyncio.create_task(
                             self._handle_breach(
@@ -213,22 +260,90 @@ class ThresholdHandler:
                 else:
                     st.above_threshold_since = None
 
-    def _maybe_cleanup(self, now: float) -> None:
+        # Episode summaries for pruned tracks are written OUTSIDE the lock (DB IO)
+        # and fire-and-forget so they never slow frame processing.
+        for summary in episode_summaries:
+            asyncio.create_task(self._emit_episode_summary(summary))
+
+    def _maybe_cleanup(self, now: float) -> list[_EpisodeSummary]:
         """Prune person states unseen past _STATE_TTL_SEC. Caller holds the lock.
 
         Runs at most once per _CLEANUP_EVERY_SEC. Also clears any orphaned
         _inflight keys whose state has been pruned (defensive — _handle_breach
-        normally discards them).
+        normally discards them). Returns an episode-summary for each pruned track
+        whose peak risk reached at least the yellow band, so the caller can write
+        them to the activity log (#2: see live scoring even without an alert).
         """
         if now - self._last_cleanup < _CLEANUP_EVERY_SEC:
-            return
+            return []
         self._last_cleanup = now
         stale = [k for k, st in self._state.items() if now - st.last_seen > _STATE_TTL_SEC]
+        summaries: list[_EpisodeSummary] = []
         for k in stale:
+            st = self._state[k]
+            if st.episode_peak_risk_pct > _EPISODE_LOG_MIN_PCT:
+                cam_path, pid = k
+                summaries.append(
+                    _EpisodeSummary(
+                        cam_path=cam_path,
+                        person_id=pid,
+                        peak_risk_pct=st.episode_peak_risk_pct,
+                        behaviors=list(st.last_behaviors),
+                        behavior_scores=dict(st.last_behavior_scores),
+                        alerted=st.alerted,
+                        duration_sec=max(0.0, st.last_seen - st.first_seen),
+                    )
+                )
             del self._state[k]
             self._inflight.discard(k)
         if stale:
             log.debug("threshold_handler.cleanup", pruned=len(stale), remaining=len(self._state))
+        return summaries
+
+    async def _emit_episode_summary(self, s: _EpisodeSummary) -> None:
+        """Write a risk_episode row for a finished episode (#2: live-scoring
+        visibility — peak risk + which behaviours fired, even with no alert)."""
+        try:
+            async with session_scope() as db:
+                camera = (
+                    await db.execute(select(Camera).where(Camera.mediamtx_path == s.cam_path))
+                ).scalar_one_or_none()
+                if camera is None:
+                    return
+                store = await db.get(Store, camera.store_id)
+                org_id = store.organization_id if store else None
+                level = _risk_level(s.peak_risk_pct)
+                severity = {
+                    "MEDIUM": EventSeverity.info,
+                    "HIGH": EventSeverity.warning,
+                    "CRITICAL": EventSeverity.critical,
+                }.get(level, EventSeverity.info)
+                behs = ", ".join(s.behaviors) if s.behaviors else "—"
+                tail = " — сэрэмжлүүлэг үүссэн" if s.alerted else ""
+                await event_log.emit(
+                    db,
+                    event_type=EventType.risk_episode,
+                    severity=severity,
+                    message=(
+                        f"Объект {camera.name}: оргил эрсдэл {s.peak_risk_pct:.0f}% "
+                        f"({level}) — {behs}{tail}"
+                    ),
+                    organization_id=org_id,
+                    store_id=camera.store_id,
+                    camera_id=camera.id,
+                    actor_label="AI",
+                    detail={
+                        "person_id": s.person_id,
+                        "peak_risk_pct": round(s.peak_risk_pct, 1),
+                        "level": level,
+                        "behaviors": s.behaviors,
+                        "behavior_scores": s.behavior_scores,
+                        "alerted": s.alerted,
+                        "duration_sec": round(s.duration_sec, 1),
+                    },
+                )
+        except Exception:  # noqa: BLE001 — summary logging must never disrupt L5
+            log.warning("threshold_handler.episode_summary_failed", exc_info=True)
 
     async def _handle_breach(
         self,
