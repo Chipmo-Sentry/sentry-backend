@@ -15,6 +15,7 @@ from sentry_backend.db.models.billing import (
 )
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.clip import Clip
+from sentry_backend.db.models.event_log import EventLog, EventSeverity, EventType
 from sentry_backend.db.models.feedback import Feedback, FeedbackVerdict
 from sentry_backend.db.models.invitation import Invitation
 from sentry_backend.db.models.lead import Lead, LeadStatus
@@ -41,6 +42,9 @@ __all__ = [
     "BillingProfile",
     "Camera",
     "Clip",
+    "EventLog",
+    "EventSeverity",
+    "EventType",
     "Feedback",
     "FeedbackVerdict",
     "Invitation",

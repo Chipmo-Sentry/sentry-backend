@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentry_backend.db.models.ai_node import AiNode
 from sentry_backend.db.models.alert import Alert
 from sentry_backend.db.models.camera import Camera
+from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.db.models.feedback import Feedback
 from sentry_backend.db.models.store import Store
 from sentry_backend.db.models.user import User
@@ -36,7 +37,7 @@ from sentry_backend.schemas.org import (
     OrganizationPublic,
     UserInvite,
 )
-from sentry_backend.services import org_delete
+from sentry_backend.services import event_log, org_delete
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -181,7 +182,7 @@ async def list_orgs(
 async def create_org(
     body: OrganizationCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(require_super_admin)],
+    actor: Annotated[User, Depends(require_super_admin)],
 ) -> OrganizationPublic:
     if await org_repo.get_org_by_slug(db, body.slug) is not None:
         raise HTTPException(
@@ -189,6 +190,16 @@ async def create_org(
             detail=f"'{body.slug}' богино нэр аль хэдийн ашиглагдсан байна.",
         )
     org = await org_repo.create_org(db, name=body.name, slug=body.slug)
+    await event_log.emit(
+        db,
+        event_type=EventType.org_created,
+        severity=EventSeverity.success,
+        message=f"Байгууллага үүслээ: {org.name}",
+        organization_id=org.id,
+        actor_user_id=actor.id,
+        actor_label=actor.email,
+        detail={"slug": org.slug},
+    )
     return OrganizationPublic.model_validate(org)
 
 

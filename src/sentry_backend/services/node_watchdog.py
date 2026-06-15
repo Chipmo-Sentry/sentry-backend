@@ -217,6 +217,8 @@ class NodeWatchdog:
         # (debounce) and cameras already alerted this outage.
         self._camera_candidates: set[CameraKey] = set()
         self._notified_cameras: set[CameraKey] = set()
+        # Desktop-agent (agent-pc) offline transitions for the event log.
+        self._notified_agents_offline: set[UUID] = set()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -270,9 +272,11 @@ class NodeWatchdog:
         for node in newly_offline:
             log.warning("ai_node_offline", node_id=str(node.id), name=_node_label(node))
             await _send_telegram(_format_offline(node, now=now))
+            await self._emit_node(node, online=False)
         for node in recovered:
             log.info("ai_node_recovered", node_id=str(node.id), name=_node_label(node))
             await _send_telegram(_format_recovered(node))
+            await self._emit_node(node, online=True)
 
         # Per-camera stream health from the latest telemetry (audit T12 #3).
         cams_down, cams_recovered = detect_camera_transitions(
@@ -291,6 +295,130 @@ class NodeWatchdog:
                 fps=cam.fps,
             )
             await _send_telegram(_format_camera_down(node, cam))
+            await self._emit_camera(node, cam, down=True)
         for node, cam in cams_recovered:
             log.info("camera_stream_recovered", node_id=str(node.id), camera_id=cam.camera_id)
             await _send_telegram(_format_camera_recovered(node, cam))
+            await self._emit_camera(node, cam, down=False)
+
+        # Desktop agents (agent-pc) — same offline/online state machine, event
+        # log only (Telegram noise is reserved for AI nodes + cameras).
+        await self._check_agents(now=now, offline_after_sec=settings.node_offline_after_sec)
+
+    async def _check_agents(self, *, now: datetime, offline_after_sec: int) -> None:
+        from sentry_backend.db.models.agent import Agent
+        from sentry_backend.db.models.event_log import EventSeverity, EventType
+        from sentry_backend.db.session import session_scope
+        from sentry_backend.services import event_log
+
+        try:
+            async with session_scope() as db:
+                agents = list(
+                    (await db.execute(select(Agent).where(Agent.is_active.is_(True))))
+                    .scalars()
+                    .all()
+                )
+                newly_offline, recovered = detect_transitions(
+                    agents,  # type: ignore[arg-type]  # Agent satisfies is_offline's needs
+                    self._notified_agents_offline,
+                    now=now,
+                    offline_after_sec=offline_after_sec,
+                )
+                for agent in newly_offline:
+                    log.warning("agent_offline", agent_id=str(agent.id))
+                    await event_log.emit(
+                        db,
+                        event_type=EventType.agent_offline,
+                        severity=EventSeverity.error,
+                        message=f"Десктоп апп унтарлаа: {agent.name or 'нэргүй'}",
+                        organization_id=agent.organization_id,  # type: ignore[attr-defined]
+                        store_id=agent.store_id,  # type: ignore[attr-defined]
+                        agent_id=agent.id,
+                        actor_label="Систем",
+                    )
+                for agent in recovered:
+                    log.info("agent_recovered", agent_id=str(agent.id))
+                    await event_log.emit(
+                        db,
+                        event_type=EventType.agent_online,
+                        severity=EventSeverity.success,
+                        message=f"Десктоп апп буцаж асаалаа: {agent.name or 'нэргүй'}",
+                        organization_id=agent.organization_id,  # type: ignore[attr-defined]
+                        store_id=agent.store_id,  # type: ignore[attr-defined]
+                        agent_id=agent.id,
+                        actor_label="Систем",
+                    )
+                # Retention: drop heartbeat rows past the window (cheap indexed
+                # delete; runs every watchdog tick).
+                removed = await event_log.prune_heartbeats(
+                    db, older_than_seconds=event_log.HEARTBEAT_RETENTION_SEC
+                )
+                if removed:
+                    log.info("event_log_heartbeats_pruned", removed=removed)
+        except Exception:  # noqa: BLE001 — watchdog must outlive logging errors
+            log.warning("agent_watchdog_failed", exc_info=True)
+
+    async def _emit_node(self, node: NodeLike, *, online: bool) -> None:
+        """Platform-level event log row for an AI-node up/down transition."""
+        from sentry_backend.db.models.event_log import EventSeverity, EventType
+        from sentry_backend.db.session import session_scope
+        from sentry_backend.services import event_log
+
+        try:
+            async with session_scope() as db:
+                await event_log.emit(
+                    db,
+                    event_type=EventType.node_online if online else EventType.node_offline,
+                    severity=EventSeverity.success if online else EventSeverity.error,
+                    message=(
+                        f"AI node буцаж онлайн боллоо: {_node_label(node)}"
+                        if online
+                        else f"AI node офлайн боллоо: {_node_label(node)}"
+                    ),
+                    ai_node_id=node.id,
+                    actor_label="Систем",
+                )
+        except Exception:  # noqa: BLE001 — the watchdog must outlive logging errors
+            log.warning("node_watchdog_event_emit_failed", exc_info=True)
+
+    async def _emit_camera(self, node: NodeLike, cam: CameraHealth, *, down: bool) -> None:
+        """Org-scoped event for a camera stream down/recovered. Resolves the
+        owning org via Camera.mediamtx_path (the wire camera_id); platform-level
+        if the camera can't be mapped."""
+        from sqlalchemy import select
+
+        from sentry_backend.db.models.camera import Camera
+        from sentry_backend.db.models.event_log import EventSeverity, EventType
+        from sentry_backend.db.models.store import Store
+        from sentry_backend.db.session import session_scope
+        from sentry_backend.services import event_log
+
+        try:
+            async with session_scope() as db:
+                row = (
+                    await db.execute(
+                        select(Camera.id, Store.organization_id, Camera.name)
+                        .join(Store, Camera.store_id == Store.id)
+                        .where(Camera.mediamtx_path == cam.camera_id)
+                    )
+                ).first()
+                camera_id = row[0] if row else None
+                org_id = row[1] if row else None
+                cam_name = row[2] if row else cam.camera_id
+                await event_log.emit(
+                    db,
+                    event_type=EventType.camera_stream_down
+                    if down
+                    else EventType.camera_stream_recovered,
+                    severity=EventSeverity.warning if down else EventSeverity.success,
+                    message=(
+                        f"Камер унаслаа: {cam_name}" if down else f"Камер сэргэлээ: {cam_name}"
+                    ),
+                    organization_id=org_id,
+                    camera_id=camera_id,
+                    ai_node_id=node.id,
+                    actor_label="Систем",
+                    detail={"status": cam.status, "fps": cam.fps},
+                )
+        except Exception:  # noqa: BLE001
+            log.warning("node_watchdog_camera_event_emit_failed", exc_info=True)

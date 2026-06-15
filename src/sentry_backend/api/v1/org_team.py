@@ -17,6 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.db.models.organization import OrgRole
 from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import get_current_user
@@ -37,7 +38,7 @@ from sentry_backend.schemas.org_team import (
     OrgDeleteConfirm,
     PendingInvite,
 )
-from sentry_backend.services import email_service, org_delete
+from sentry_backend.services import email_service, event_log, org_delete
 from sentry_backend.settings import get_settings
 
 log = get_logger("sentry_backend.api.org")
@@ -85,13 +86,25 @@ async def delete_my_org(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Баталгаажуулахын тулд байгууллагын slug-ээ зөв оруулна уу.",
         )
+    org_name, org_slug = org.name, org.slug
     sweep = await org_delete.delete_organization(db, org)
     log.info(
         "org.self_deleted",
         org_id=str(org_id),
-        slug=org.slug,
+        slug=org_slug,
         by=str(actor.id),
         clips_removed=sweep.removed,
+    )
+    # Platform-level (organization_id=None): an org-scoped row would cascade away
+    # with the org we just deleted, so the audit trail must outlive the tenant.
+    await event_log.emit(
+        db,
+        event_type=EventType.org_deleted,
+        severity=EventSeverity.warning,
+        message=f"Байгууллага устлаа: {org_name} ({org_slug})",
+        actor_user_id=actor.id,
+        actor_label=actor.email,
+        detail={"slug": org_slug, "clips_removed": sweep.removed},
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -152,6 +165,16 @@ async def create_invitation(
         ),
     )
     log.info("org.invite_created", org_id=str(org_id), email=body.email, emailed=emailed)
+    await event_log.emit(
+        db,
+        event_type=EventType.user_invited,
+        severity=EventSeverity.info,
+        message=f"Хэрэглэгч уригдлаа: {body.email} ({body.role.value})",
+        organization_id=org_id,
+        actor_user_id=actor.id,
+        actor_label=actor.email,
+        detail={"email": body.email, "role": body.role.value, "emailed": emailed},
+    )
     return InviteResult(
         id=inv.id,
         email=inv.email,
@@ -212,6 +235,16 @@ async def remove_member(
             detail="Байгууллагын эзнийг (owner) хасч болохгүй.",
         )
     await org_repo.remove_membership(db, user_id=user_id, organization_id=org_id)
+    await event_log.emit(
+        db,
+        event_type=EventType.member_access_changed,
+        severity=EventSeverity.warning,
+        message=f"Гишүүн хасагдлаа: {target[0].email}",
+        organization_id=org_id,
+        actor_user_id=actor.id,
+        actor_label=actor.email,
+        detail={"removed_user_id": str(user_id), "email": target[0].email},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -244,6 +277,20 @@ async def update_member(
         )
     user = await user_repo.update_user_flags(db, target[0], is_active=body.is_active)
     log.info("org.member_access", org_id=str(org_id), user_id=str(user_id), active=body.is_active)
+    await event_log.emit(
+        db,
+        event_type=EventType.member_access_changed,
+        severity=EventSeverity.info,
+        message=(
+            f"Гишүүн идэвхжлээ: {user.email}"
+            if body.is_active
+            else f"Гишүүн түгжигдлээ: {user.email}"
+        ),
+        organization_id=org_id,
+        actor_user_id=actor.id,
+        actor_label=actor.email,
+        detail={"user_id": str(user_id), "is_active": body.is_active},
+    )
     return OrgMemberPublic(user=UserPublic.model_validate(user), role=target[1])
 
 
@@ -273,4 +320,14 @@ async def accept_invite(
     )
     await invitation_repo.mark_accepted(db, inv)
     log.info("org.invite_accepted", org_id=str(inv.organization_id), email=inv.email)
+    await event_log.emit(
+        db,
+        event_type=EventType.invite_accepted,
+        severity=EventSeverity.success,
+        message=f"Урилга зөвшөөрөгдлөө: {inv.email}",
+        organization_id=inv.organization_id,
+        actor_user_id=user.id,
+        actor_label=inv.email,
+        detail={"role": inv.role.value if hasattr(inv.role, "value") else str(inv.role)},
+    )
     return UserPublic.model_validate(user)

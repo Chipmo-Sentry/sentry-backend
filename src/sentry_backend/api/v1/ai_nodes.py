@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.ai_node import AiNode
+from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.deps.ai_node_auth import get_current_ai_node
 from sentry_backend.deps.db import get_db
 from sentry_backend.ratelimit import limiter
@@ -23,6 +24,7 @@ from sentry_backend.schemas.ai_node import (
     AiNodePairResult,
 )
 from sentry_backend.security import create_ai_node_token
+from sentry_backend.services import event_log
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/ai-nodes", tags=["ai-nodes"])
@@ -55,6 +57,14 @@ async def pair_ai_node(
         paired_by_user_id=pairing.created_by_user_id,
     )
     await ai_node_repo.mark_consumed(db, pairing, node.id)
+    await event_log.emit(
+        db,
+        event_type=EventType.node_paired,
+        severity=EventSeverity.success,
+        message=f"AI node холбогдлоо: {node.name or node.hostname or node.id}",
+        ai_node_id=node.id,
+        actor_label=node.name or node.hostname or "ai-node",
+    )
     await db.commit()
     return AiNodePairResult(
         ai_node_token=create_ai_node_token(node.id),
@@ -80,6 +90,14 @@ async def ai_node_heartbeat(
     await ai_node_repo.touch_heartbeat(db, node, telemetry)
     # Append to the resource time-series for the observability dashboard (docs/19).
     await ai_node_repo.insert_metric(db, node.id, body.model_dump())
+    await event_log.emit(
+        db,
+        event_type=EventType.node_heartbeat,
+        message=f"AI node асаалттай: {node.name or node.hostname or node.id}",
+        ai_node_id=node.id,
+        actor_label=node.name or node.hostname or "ai-node",
+        is_heartbeat=True,
+    )
     await db.commit()
     return _config(node)
 

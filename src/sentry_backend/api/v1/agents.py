@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.agent import Agent
+from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.db.models.organization import OrganizationMember, OrgRole
 from sentry_backend.db.models.store import Store
 from sentry_backend.db.models.user import User
@@ -32,7 +33,7 @@ from sentry_backend.schemas.agent import (
 )
 from sentry_backend.schemas.camera import CameraPublic
 from sentry_backend.security import create_agent_token
-from sentry_backend.services import live_provision
+from sentry_backend.services import event_log, live_provision
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
@@ -147,6 +148,16 @@ async def pair_agent(
             paired_by_user_id=pairing.created_by_user_id,
         )
     await agent_repo.mark_consumed(db, pairing, agent.id)
+    await event_log.emit(
+        db,
+        event_type=EventType.agent_paired,
+        severity=EventSeverity.success,
+        message=f"Десктоп апп холбогдлоо: {agent.name or 'нэргүй'} ({store.name})",
+        organization_id=agent.organization_id,
+        store_id=agent.store_id,
+        agent_id=agent.id,
+        actor_label=agent.name or "agent",
+    )
     return AgentPairResult(
         agent_token=create_agent_token(agent.id),
         agent_id=agent.id,
@@ -193,6 +204,18 @@ async def agent_register_camera(
             detail="Энэ компьютерт холбогдсон дэлгүүр хүчингүй болсон байна.",
         )
     await agent_repo.touch_last_seen(db, agent)
+    await event_log.emit(
+        db,
+        event_type=EventType.camera_registered,
+        severity=EventSeverity.success,
+        message=f"Камер холбогдлоо: {cam.name}",
+        organization_id=agent.organization_id,
+        store_id=agent.store_id,
+        camera_id=cam.id,
+        agent_id=agent.id,
+        actor_label=agent.name or "agent",
+        detail={"mediamtx_path": cam.mediamtx_path},
+    )
     await db.commit()
     if cam.mediamtx_path and body.rtsp_url:
         await live_provision.provision(
@@ -278,3 +301,13 @@ async def agent_heartbeat(
     agent: Annotated[Agent, Depends(get_current_agent)],
 ) -> None:
     await agent_repo.touch_last_seen(db, agent)
+    await event_log.emit(
+        db,
+        event_type=EventType.agent_heartbeat,
+        message=f"Десктоп апп асаалттай: {agent.name or 'нэргүй'}",
+        organization_id=agent.organization_id,
+        store_id=agent.store_id,
+        agent_id=agent.id,
+        actor_label=agent.name or "agent",
+        is_heartbeat=True,
+    )

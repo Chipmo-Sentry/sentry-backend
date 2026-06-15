@@ -36,6 +36,7 @@ class FakeUser:
     id: UUID = field(default_factory=uuid4)
     is_super_admin: bool = False
     is_active: bool = True
+    email: str = "owner@example.com"
 
 
 class FakeScalars:

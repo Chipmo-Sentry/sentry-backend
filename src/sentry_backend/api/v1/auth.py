@@ -4,8 +4,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.event_log import EventSeverity, EventType
+from sentry_backend.db.models.organization import OrganizationMember
 from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import get_current_user
 from sentry_backend.deps.db import get_db
@@ -21,6 +24,7 @@ from sentry_backend.security import (
     decode_user_token,
     set_auth_cookies,
 )
+from sentry_backend.services import event_log
 from sentry_backend.services.auth_service import authenticate, issue_tokens
 from sentry_backend.settings import get_settings
 
@@ -30,7 +34,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 @router.post("/login", response_model=LoginResponse)
 @limiter.limit(lambda: get_settings().login_rate_limit)
 async def login(
-    request: Request,  # noqa: ARG001 — required by slowapi's limiter
+    request: Request,  # required by slowapi's limiter + client IP for the audit log
     body: LoginRequest,
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -43,7 +47,32 @@ async def login(
         )
     tokens = issue_tokens(user.id, user.token_version)
     set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
+    await _emit_auth_event(db, user, EventType.user_login, "нэвтэрлээ", request)
     return LoginResponse(user=UserPublic.model_validate(user))
+
+
+async def _emit_auth_event(
+    db: AsyncSession, user: User, event_type: EventType, verb: str, request: Request | None
+) -> None:
+    """Record a login/logout on the user's org timeline (NULL org if none)."""
+    org_id = (
+        await db.execute(
+            select(OrganizationMember.organization_id)
+            .where(OrganizationMember.user_id == user.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    ip = request.client.host if request and request.client else None
+    await event_log.emit(
+        db,
+        event_type=event_type,
+        severity=EventSeverity.info,
+        message=f"{user.email} {verb}",
+        organization_id=org_id,
+        actor_user_id=user.id,
+        actor_label=user.email,
+        detail={"ip": ip} if ip else None,
+    )
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -68,6 +97,7 @@ async def logout(
             user = await get_user_by_id(db, user_id)
             if user is not None:
                 user.token_version += 1
+                await _emit_auth_event(db, user, EventType.user_logout, "гарлаа", None)
                 await db.commit()
     clear_auth_cookies(response)
 

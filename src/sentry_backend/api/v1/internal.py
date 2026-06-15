@@ -9,13 +9,15 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.alert import AlertLevel
+from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
 from sentry_backend.repository import ai_node_repo, alert_repo, rag_case_repo
 from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic
 from sentry_backend.schemas.rag import RagCaseCreate, RagCaseMatch, RagSimilarRequest
 from sentry_backend.security import decode_user_token
-from sentry_backend.services import alert_notify
+from sentry_backend.services import alert_notify, event_log
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.live_broker import get_live_broker
@@ -23,6 +25,14 @@ from sentry_backend.services.threshold_handler import get_threshold_handler
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/internal", tags=["internal"])
+
+# Map an alert's severity band → event-log severity for the activity timeline.
+_ALERT_SEVERITY = {
+    AlertLevel.ignore: EventSeverity.info,
+    AlertLevel.log: EventSeverity.info,
+    AlertLevel.notify: EventSeverity.warning,
+    AlertLevel.review: EventSeverity.critical,
+}
 
 _INTERNAL_TOKEN_EXCEPTION = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -148,6 +158,25 @@ async def create_alert_from_ai(
     payload = AlertPublic.model_validate(alert).model_dump(mode="json")
     await get_broker().publish(clip.organization_id, payload)
     await alert_notify.notify_alert(db, alert)
+
+    # Activity timeline: suspicious activity is one of the headline event types.
+    await event_log.emit(
+        db,
+        event_type=EventType.alert_created,
+        severity=_ALERT_SEVERITY.get(alert.alert_level, EventSeverity.warning),
+        message=f"Сэжигтэй үйлдэл илрлээ: {alert.category.value} ({alert.confidence:.0%})",
+        organization_id=alert.organization_id,
+        store_id=alert.store_id,
+        camera_id=alert.camera_id,
+        actor_label="AI",
+        detail={
+            "alert_id": str(alert.id),
+            "category": alert.category.value,
+            "confidence": alert.confidence,
+            "alert_level": alert.alert_level.value,
+            "model_name": alert.model_name,
+        },
+    )
 
     return AlertPublic.model_validate(alert)
 
