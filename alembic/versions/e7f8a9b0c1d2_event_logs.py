@@ -54,10 +54,9 @@ EVENT_SEVERITY = sa.Enum(
 
 def upgrade() -> None:
     """Upgrade schema."""
-    bind = op.get_bind()
-    EVENT_TYPE.create(bind, checkfirst=True)
-    EVENT_SEVERITY.create(bind, checkfirst=True)
-
+    # The enum PG types are auto-created by create_table from the inline columns
+    # below (repo convention — see billing_core). Pre-creating them here too
+    # would emit CREATE TYPE twice and fail on Postgres ("type already exists").
     op.create_table(
         "event_logs",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
