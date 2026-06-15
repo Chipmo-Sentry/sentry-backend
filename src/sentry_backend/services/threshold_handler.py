@@ -776,6 +776,24 @@ async def create_live_alert(
         log.warning("live_alert.camera_unknown", mediamtx_path=mediamtx_path)
         return None
 
+    # Dedup: a breach alert for this same (camera, person) within the breach
+    # cooldown is a duplicate of the same episode (node retry, or a stray second
+    # producer). Drop it before writing the clip file so we never persist twins.
+    if person_id is not None:
+        async with session_scope() as db:
+            if await alert_repo.recent_live_alert_exists(
+                db,
+                camera_id=camera.id,
+                person_id=person_id,
+                within_sec=settings.live_breach_cooldown_sec,
+            ):
+                log.info(
+                    "live_alert.duplicate_skipped",
+                    mediamtx_path=mediamtx_path,
+                    person_id=person_id,
+                )
+                return None
+
     max_bytes = settings.max_clip_size_mb * 1024 * 1024
     if len(clip_bytes) > max_bytes:
         log.error("live_alert.clip_too_large", decoded_bytes=len(clip_bytes), max_bytes=max_bytes)

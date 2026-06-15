@@ -208,6 +208,7 @@ async def update_node(
     enabled: bool | None = None,
     provider: str | None = None,
     frame_skip: int | None = None,
+    breach_mode: str | None = None,
 ) -> AiNode:
     if name is not None:
         node.name = name
@@ -217,5 +218,7 @@ async def update_node(
         node.provider = provider
     if frame_skip is not None:
         node.frame_skip = frame_skip
+    if breach_mode is not None:
+        node.breach_mode = breach_mode
     await db.flush()
     return node

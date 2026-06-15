@@ -37,6 +37,9 @@ class AiNodeConfig(BaseModel):
     enabled: bool
     provider: str
     frame_skip: int
+    # Live-breach topology (central control). "node_push" = node detects + cuts +
+    # VLM-verifies + POSTs alerts; "off" = AI/overlay only, no alerts.
+    breach_mode: str = "node_push"
 
 
 class AiNodePairResult(BaseModel):
@@ -142,6 +145,10 @@ class AiNodeHeartbeat(BaseModel):
     provider_effective: str | None = Field(default=None, max_length=64)
     provider_ready: bool | None = None
     provider_error: str | None = Field(default=None, max_length=300)
+    # Central-control feedback for the live-breach topology: the breach_mode the
+    # node ACTUALLY applied (effective), so the dashboard can show applied vs
+    # applying next to the desired breach_mode. Stored in telemetry JSON.
+    breach_mode_effective: str | None = Field(default=None, max_length=16)
 
 
 class AiNodePairingCodePublic(BaseModel):
@@ -164,6 +171,7 @@ class AiNodePublic(BaseModel):
     enabled: bool
     provider: str
     frame_skip: int
+    breach_mode: str
     created_at: datetime
 
     @field_serializer("last_seen_at", "created_at")
@@ -220,6 +228,16 @@ class AiNodePublic(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def breach_mode_effective(self) -> str | None:
+        """Live-breach topology the node actually applied (from its last
+        heartbeat). The UI compares this to `breach_mode` (desired) to show
+        applied vs applying. None for old node versions / no telemetry yet."""
+        obj = self._telemetry_obj()
+        v = obj.get("breach_mode_effective") if obj else None
+        return v if isinstance(v, str) else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def is_online(self) -> bool:
         """Server-computed online status — independent of the viewer's clock."""
         if self.last_seen_at is None:
@@ -237,3 +255,4 @@ class AiNodeUpdate(BaseModel):
     enabled: bool | None = None
     provider: str | None = Field(default=None, max_length=64)
     frame_skip: int | None = Field(default=None, ge=0, le=30)
+    breach_mode: Literal["node_push", "off"] | None = None

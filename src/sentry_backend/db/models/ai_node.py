@@ -39,6 +39,14 @@ class AiNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     provider: Mapped[str] = mapped_column(String(64), default="qwen3-vl-4b", nullable=False)
     frame_skip: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    # Live-breach topology — the SINGLE source of truth for who creates breach
+    # alerts (ADR-0026 central control, like `provider`). The node polls this and
+    # hot-applies it; nothing on the node decides it locally any more, so the old
+    # node-env / backend-env split (which could double-fire or silently no-op) is
+    # gone. "node_push" = node detects → cuts+VLM → POSTs the finished alert
+    # (the only live path); "off" = AI runs + overlays risk but creates NO alerts
+    # (maintenance). The retired cloud→node backend-pull is not an option here.
+    breach_mode: Mapped[str] = mapped_column(String(16), default="node_push", nullable=False)
 
     paired_by_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),

@@ -118,6 +118,7 @@ def _public_node(telemetry: str | None) -> AiNodePublic:
         enabled=True,
         provider="minicpm",
         frame_skip=3,
+        breach_mode="node_push",
         created_at=NOW - timedelta(days=1),
     )
 

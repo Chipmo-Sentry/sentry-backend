@@ -65,7 +65,11 @@ async def create_camera(
     await db.commit()
     if cam.mediamtx_path and body.rtsp_url:
         await live_provision.provision(
-            cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled, store_id=str(cam.store_id)
+            cam.mediamtx_path,
+            body.rtsp_url,
+            enabled=cam.enabled,
+            store_id=str(cam.store_id),
+            risk_threshold=cam.risk_threshold,
         )
     return CameraPublic.from_orm_camera(cam)
 
@@ -146,7 +150,11 @@ async def update_camera(
         rtsp = await camera_repo.decrypt_rtsp_url(cam)
         if rtsp:
             await live_provision.provision(
-                cam.mediamtx_path, rtsp, enabled=cam.enabled, store_id=str(cam.store_id)
+                cam.mediamtx_path,
+                rtsp,
+                enabled=cam.enabled,
+                store_id=str(cam.store_id),
+                risk_threshold=cam.risk_threshold,
             )
     return CameraPublic.from_orm_camera(cam)
 

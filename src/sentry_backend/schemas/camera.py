@@ -26,7 +26,9 @@ class CameraCreate(BaseModel):
     # mediamtx_path is unique per Camera and drives the live-worker camera_id;
     # if None, backend auto-generates a slug from `name`.
     mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
-    risk_threshold: float = Field(default=50.0, ge=0.0, le=100.0)
+    # Default 11 = yellow band (matches the Camera model + the agent): cast a wide
+    # net and let the VLM filter "browsing". Per-camera tunable in the web UI.
+    risk_threshold: float = Field(default=11.0, ge=0.0, le=100.0)
 
 
 class CameraUpdate(BaseModel):
@@ -59,7 +61,7 @@ class CameraPublic(BaseModel):
     created_at: datetime
     # L5 live-pipeline fields
     mediamtx_path: str | None = None
-    risk_threshold: float = 50.0
+    risk_threshold: float = 11.0
 
     @classmethod
     def from_orm_camera(cls, camera: Camera) -> "CameraPublic":

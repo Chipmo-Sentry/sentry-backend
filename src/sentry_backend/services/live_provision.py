@@ -18,12 +18,18 @@ log = get_logger("sentry_backend.live_provision")
 
 
 async def provision(
-    mediamtx_path: str, camera_rtsp: str, *, enabled: bool, store_id: str | None = None
+    mediamtx_path: str,
+    camera_rtsp: str,
+    *,
+    enabled: bool,
+    store_id: str | None = None,
+    risk_threshold: float | None = None,
 ) -> None:
     """Bring a camera online (or take it offline if disabled).
 
     Enabled  → add MediaMTX path (pulls the camera RTSP) + start AI worker.
     Disabled → tear both down. `store_id` enables cross-camera re-ID (ADR-0023).
+    `risk_threshold` is the per-camera breach threshold the node fires at.
     """
     if not enabled:
         await deprovision(mediamtx_path)
@@ -32,7 +38,9 @@ async def provision(
     # MediaMTX needs the path to exist before the AI worker can pull from it;
     # add_path returned, so the path config is registered. The worker retries
     # its RTSP connection internally if MediaMTX isn't serving frames yet.
-    await live_ai_client.start_worker(mediamtx_path, store_id=store_id)
+    await live_ai_client.start_worker(
+        mediamtx_path, store_id=store_id, risk_threshold=risk_threshold
+    )
 
 
 async def deprovision(mediamtx_path: str) -> None:

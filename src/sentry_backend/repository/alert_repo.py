@@ -1,5 +1,6 @@
 """Alert CRUD."""
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -7,6 +8,32 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel, AlertTrigger
+
+
+async def recent_live_alert_exists(
+    db: AsyncSession,
+    *,
+    camera_id: UUID,
+    person_id: int,
+    within_sec: float,
+) -> bool:
+    """True if a live-threshold alert for this (camera, tracked person) already
+    landed within `within_sec`. Defends against a duplicate breach alert for the
+    same episode — e.g. a node retrying its push, or (paranoia) a stray
+    backend-pull while the node also pushes. Legitimate re-alerts are ≥ the
+    breach cooldown apart, so this never suppresses a genuine new episode."""
+    cutoff = datetime.now(UTC) - timedelta(seconds=within_sec)
+    stmt = (
+        select(Alert.id)
+        .where(
+            Alert.camera_id == camera_id,
+            Alert.person_id == person_id,
+            Alert.triggered_by == AlertTrigger.live_threshold,
+            Alert.created_at >= cutoff,
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).first() is not None
 
 
 async def get_alert_for_org(db: AsyncSession, alert_id: UUID, org_id: UUID) -> Alert | None:

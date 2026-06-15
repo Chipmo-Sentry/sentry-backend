@@ -53,7 +53,9 @@ class AgentCameraCreate(BaseModel):
     # Agent-supplied, so validate it the same way as the user-facing schema —
     # it reaches the recordings filesystem path and the MediaMTX control API.
     mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
-    risk_threshold: float = Field(default=50.0, ge=0.0, le=100.0)
+    # Default 11 = yellow band (matches the Camera model). The agent already sends
+    # 11; this fallback ensures an older agent that omits it isn't stuck at deep-red.
+    risk_threshold: float = Field(default=11.0, ge=0.0, le=100.0)
 
 
 class AgentCameraUpdate(BaseModel):

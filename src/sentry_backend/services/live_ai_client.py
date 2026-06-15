@@ -38,10 +38,16 @@ def mediamtx_stream_url(mediamtx_path: str) -> str | None:
     return f"{base.rstrip('/')}/{mediamtx_path}"
 
 
-async def start_worker(mediamtx_path: str, store_id: str | None = None) -> bool:
+async def start_worker(
+    mediamtx_path: str,
+    store_id: str | None = None,
+    risk_threshold: float | None = None,
+) -> bool:
     """POST sentry-ai /v1/live/start for this camera. Never raises.
 
     `store_id` enables store-scoped cross-camera re-ID on the node (ADR-0023).
+    `risk_threshold` (0-100) is the per-camera breach threshold the node fires at;
+    None lets the node fall back to its global default.
     """
     settings = get_settings()
     if not settings.sentry_ai_url or not settings.mediamtx_rtsp_url:
@@ -53,7 +59,13 @@ async def start_worker(mediamtx_path: str, store_id: str | None = None) -> bool:
 
     url = f"{settings.sentry_ai_url.rstrip('/')}/v1/live/start"
     headers = _ai_auth_headers(settings)
-    body = {"camera_id": mediamtx_path, "rtsp_url": rtsp_url, "store_id": store_id}
+    body: dict[str, object] = {
+        "camera_id": mediamtx_path,
+        "rtsp_url": rtsp_url,
+        "store_id": store_id,
+    }
+    if risk_threshold is not None:
+        body["risk_threshold"] = risk_threshold
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.post(url, json=body, headers=headers)

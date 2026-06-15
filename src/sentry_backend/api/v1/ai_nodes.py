@@ -31,7 +31,12 @@ router = APIRouter(prefix="/api/v1/ai-nodes", tags=["ai-nodes"])
 
 
 def _config(node: AiNode) -> AiNodeConfig:
-    return AiNodeConfig(enabled=node.enabled, provider=node.provider, frame_skip=node.frame_skip)
+    return AiNodeConfig(
+        enabled=node.enabled,
+        provider=node.provider,
+        frame_skip=node.frame_skip,
+        breach_mode=node.breach_mode,
+    )
 
 
 @router.post("/pair", response_model=AiNodePairResult)

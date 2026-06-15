@@ -219,7 +219,11 @@ async def agent_register_camera(
     await db.commit()
     if cam.mediamtx_path and body.rtsp_url:
         await live_provision.provision(
-            cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled, store_id=str(cam.store_id)
+            cam.mediamtx_path,
+            body.rtsp_url,
+            enabled=cam.enabled,
+            store_id=str(cam.store_id),
+            risk_threshold=cam.risk_threshold,
         )
     return CameraPublic.from_orm_camera(cam)
 
@@ -251,11 +255,20 @@ async def agent_update_camera(
     )
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()
-    # Re-point the live worker at the new source so the AI follows the edit.
-    if rtsp_changed and cam.mediamtx_path and body.rtsp_url:
-        await live_provision.provision(
-            cam.mediamtx_path, body.rtsp_url, enabled=cam.enabled, store_id=str(cam.store_id)
-        )
+    # Re-provision when the source OR the risk threshold changed, so the AI
+    # follows the edit (the node reads the threshold at worker start). On a
+    # threshold-only edit body.rtsp_url is None → use the stored encrypted URL.
+    threshold_changed = body.risk_threshold is not None
+    if cam.mediamtx_path and (rtsp_changed or threshold_changed):
+        rtsp = body.rtsp_url if rtsp_changed else await camera_repo.decrypt_rtsp_url(cam)
+        if rtsp:
+            await live_provision.provision(
+                cam.mediamtx_path,
+                rtsp,
+                enabled=cam.enabled,
+                store_id=str(cam.store_id),
+                risk_threshold=cam.risk_threshold,
+            )
     return CameraPublic.from_orm_camera(cam)
 
 
