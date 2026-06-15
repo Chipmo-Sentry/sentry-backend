@@ -15,14 +15,23 @@ from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
 from sentry_backend.repository import ai_node_repo, alert_repo, rag_case_repo
-from sentry_backend.schemas.alert import AlertCreateInternal, AlertPublic, LiveAlertCreate
+from sentry_backend.schemas.alert import (
+    AlertCreateInternal,
+    AlertPublic,
+    BreachClearedCreate,
+    LiveAlertCreate,
+)
 from sentry_backend.schemas.rag import RagCaseCreate, RagCaseMatch, RagSimilarRequest
 from sentry_backend.security import decode_user_token
 from sentry_backend.services import alert_notify, event_log
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.live_broker import get_live_broker
-from sentry_backend.services.threshold_handler import create_live_alert, get_threshold_handler
+from sentry_backend.services.threshold_handler import (
+    create_live_alert,
+    get_threshold_handler,
+    record_breach_cleared,
+)
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/internal", tags=["internal"])
@@ -231,6 +240,30 @@ async def create_live_alert_from_node(
             detail="Камер олдсонгүй эсвэл клип хадгалж чадсангүй.",
         )
     return alert
+
+
+@router.post("/breach-cleared", status_code=status.HTTP_204_NO_CONTENT)
+async def report_breach_cleared(
+    body: BreachClearedCreate,
+    service_name: Annotated[str, Depends(require_service_token)],
+) -> None:
+    """Observability for breaches the node dropped without alerting (VLM cleared
+    / clip-cut failed). Writes a risk_episode row so the miss is VISIBLE on the
+    activity timeline instead of silently lost. camera_id = mediamtx_path."""
+    if service_name != "sentry-ai":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Service '{service_name}' not authorized for this endpoint",
+        )
+    await record_breach_cleared(
+        mediamtx_path=body.camera_id,
+        reason=body.reason,
+        peak_risk_pct=body.peak_risk_pct,
+        person_id=body.person_id,
+        category=body.category.value if body.category else None,
+        confidence=body.confidence,
+        behaviors=body.triggered_behaviors,
+    )
 
 
 # ===== M1-LIVE L3: live metadata fanout =====

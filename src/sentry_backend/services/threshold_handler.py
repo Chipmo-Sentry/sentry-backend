@@ -881,6 +881,67 @@ async def create_live_alert(
     return alert_public
 
 
+_BREACH_CLEARED_REASONS = {
+    "vlm_browsing": "VLM энгийн худалдан авалт гэж үзсэн",
+    "vlm_low_confidence": "VLM-ийн итгэл хүрэлцээгүй",
+    "cut_failed": "Бичлэг огтлох амжилтгүй",
+}
+
+
+async def record_breach_cleared(
+    *,
+    mediamtx_path: str,
+    reason: str,
+    peak_risk_pct: float | None = None,
+    person_id: int | None = None,
+    category: str | None = None,
+    confidence: float | None = None,
+    behaviors: list[str] | None = None,
+) -> None:
+    """Observability: the node detected a sustained breach but it did NOT become
+    an alert (VLM cleared it, or the clip-cut failed). Write a risk_episode row
+    so the operator SEES the miss on the activity timeline instead of silence —
+    this makes the detection funnel (breach → cleared/alerted) visible + tunable.
+    Best-effort; never raises."""
+    try:
+        camera = await _resolve_camera_by_mediamtx_path(mediamtx_path)
+        if camera is None:
+            return
+        pct = peak_risk_pct or 0.0
+        level = _risk_level(pct)
+        severity = EventSeverity.warning if level in ("HIGH", "CRITICAL") else EventSeverity.info
+        reason_text = _BREACH_CLEARED_REASONS.get(reason, reason)
+        conf_txt = f" ({confidence:.0%})" if confidence is not None else ""
+        async with session_scope() as db:
+            store = await db.get(Store, camera.store_id) if camera.store_id else None
+            org_id = store.organization_id if store else None
+            await event_log.emit(
+                db,
+                event_type=EventType.risk_episode,
+                severity=severity,
+                message=(
+                    f"Объект {camera.name}: эрсдэл {pct:.0f}% илэрсэн ч "
+                    f"сэрэмжлүүлэг үүсээгүй — {reason_text}{conf_txt}"
+                ),
+                organization_id=org_id,
+                store_id=camera.store_id,
+                camera_id=camera.id,
+                actor_label="AI",
+                detail={
+                    "reason": reason,
+                    "person_id": person_id,
+                    "peak_risk_pct": round(pct, 1),
+                    "level": level,
+                    "category": category,
+                    "confidence": confidence,
+                    "behaviors": behaviors,
+                    "alerted": False,
+                },
+            )
+    except Exception:  # noqa: BLE001 — diagnostics must never disrupt the node path
+        log.warning("breach_cleared.emit_failed", exc_info=True)
+
+
 # === Singleton ===
 
 _handler: ThresholdHandler | None = None

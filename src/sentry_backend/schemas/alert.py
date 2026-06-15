@@ -87,3 +87,20 @@ class LiveAlertCreate(BaseModel):
     triggered_behaviors: list[str] | None = None
     triggered_sequences: list[str] | None = None
     triggered_behavior_detail: list[BehaviorDetailItem] | None = None
+
+
+class BreachClearedCreate(BaseModel):
+    """POST /api/v1/internal/breach-cleared — observability for breaches the node
+    detected but did NOT turn into an alert (VLM cleared it as browsing / low
+    confidence, or the clip-cut failed). Without this the drop is silent: the
+    operator sees nothing and can't tell a miss from "nothing happened". We log
+    it on the activity timeline so the detection funnel is visible + tunable."""
+
+    camera_id: str = Field(min_length=1)  # Camera.mediamtx_path
+    # Why no alert: "vlm_browsing" | "vlm_low_confidence" | "cut_failed" | other.
+    reason: str = Field(min_length=1, max_length=64)
+    peak_risk_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    person_id: int | None = None
+    category: AlertCategory | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    triggered_behaviors: list[str] | None = None
