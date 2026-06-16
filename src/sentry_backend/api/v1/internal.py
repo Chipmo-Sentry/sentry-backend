@@ -10,8 +10,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.ai_node import AiNode
 from sentry_backend.db.models.alert import AlertLevel
 from sentry_backend.db.models.event_log import EventSeverity, EventType
+from sentry_backend.deps.ai_node_auth import get_current_ai_node
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.service import require_service_token
 from sentry_backend.repository import ai_node_repo, alert_repo, rag_case_repo
@@ -194,16 +196,18 @@ async def create_alert_from_ai(
 @router.post("/live-alert", response_model=AlertPublic, status_code=status.HTTP_201_CREATED)
 async def create_live_alert_from_node(
     body: LiveAlertCreate,
-    service_name: Annotated[str, Depends(require_service_token)],
+    node: Annotated[AiNode, Depends(get_current_ai_node)],
 ) -> AlertPublic:
     """Node-push live alert. The AI node detected the breach, cut + VLM-verified
     the clip locally, and POSTs the finished result here (outbound — reliable,
-    unlike the old cloud→node /v1/cut-verify pull). camera_id = mediamtx_path."""
-    if service_name != "sentry-ai":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Service '{service_name}' not authorized for this endpoint",
-        )
+    unlike the old cloud→node /v1/cut-verify pull). camera_id = mediamtx_path.
+
+    Auth: the paired AI node's own JWT (typ=ai_node) — the SAME token it uses for
+    heartbeat/config. The node never holds a minted service token (pairing sets
+    SENTRY_BACKEND_SERVICE_TOKEN to the ai_node JWT), so requiring one here 401'd
+    every node-push alert. Authenticating as the node also binds the post to a
+    known, active node row."""
+    del node  # identity asserted by the dependency; tenancy derived from camera
     try:
         clip_bytes = base64.b64decode(body.clip_b64)
     except (ValueError, TypeError) as e:
@@ -245,16 +249,14 @@ async def create_live_alert_from_node(
 @router.post("/breach-cleared", status_code=status.HTTP_204_NO_CONTENT)
 async def report_breach_cleared(
     body: BreachClearedCreate,
-    service_name: Annotated[str, Depends(require_service_token)],
+    node: Annotated[AiNode, Depends(get_current_ai_node)],
 ) -> None:
     """Observability for breaches the node dropped without alerting (VLM cleared
     / clip-cut failed). Writes a risk_episode row so the miss is VISIBLE on the
-    activity timeline instead of silently lost. camera_id = mediamtx_path."""
-    if service_name != "sentry-ai":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Service '{service_name}' not authorized for this endpoint",
-        )
+    activity timeline instead of silently lost. camera_id = mediamtx_path.
+
+    Auth: the paired AI node's own JWT (typ=ai_node) — same as /live-alert."""
+    del node
     await record_breach_cleared(
         mediamtx_path=body.camera_id,
         reason=body.reason,
