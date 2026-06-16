@@ -120,6 +120,9 @@ class AiNodeHeartbeat(BaseModel):
     vram_mb: int | None = Field(default=None, ge=0)  # legacy alias; prefer vram_used_mb below
     active_cameras: int | None = None
     version: str | None = Field(default=None, max_length=64)
+    # YOLO pose model the live worker runs (e.g. "yolo26s-pose") — surfaced so the
+    # dashboard shows whether YOLO26 or YOLO11 is active.
+    yolo_model: str | None = Field(default=None, max_length=48)
     # Per-dependency health the node probes locally (e.g. {"ollama": true,
     # "ingest": false, "ai": true}). Opaque map so the node can add keys
     # without a schema change; surfaced read-only in superadmin.
