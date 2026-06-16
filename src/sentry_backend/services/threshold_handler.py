@@ -776,9 +776,12 @@ async def create_live_alert(
         log.warning("live_alert.camera_unknown", mediamtx_path=mediamtx_path)
         return None
 
-    # Dedup: a breach alert for this same (camera, person) within the breach
-    # cooldown is a duplicate of the same episode (node retry, or a stray second
-    # producer). Drop it before writing the clip file so we never persist twins.
+    level = derive_alert_level(category, confidence)
+
+    # Debounce: the VLM-primary scan fires every few seconds, so without this the
+    # menu floods with repeat "browsing" rows. Suppress a new alert only if a
+    # SAME-OR-HIGHER severity alert for this (camera, person) landed within the
+    # cooldown — an ESCALATION (e.g. browsing→theft) still gets through.
     if person_id is not None:
         async with session_scope() as db:
             if await alert_repo.recent_live_alert_exists(
@@ -786,11 +789,13 @@ async def create_live_alert(
                 camera_id=camera.id,
                 person_id=person_id,
                 within_sec=settings.live_breach_cooldown_sec,
+                at_or_above=level,
             ):
                 log.info(
-                    "live_alert.duplicate_skipped",
+                    "live_alert.debounced",
                     mediamtx_path=mediamtx_path,
                     person_id=person_id,
+                    level=level.value,
                 )
                 return None
 
@@ -825,7 +830,7 @@ async def create_live_alert(
         )
         db.add(clip)
         await db.flush()
-        level = derive_alert_level(category, confidence)
+        # `level` was computed up front (used for the debounce check).
         alert = await alert_repo.create_alert(
             db,
             clip_id=clip.id,

@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel, AlertTrigger
 
+# Severity order (low → high) for debounce comparisons.
+_LEVEL_ORDER = [AlertLevel.ignore, AlertLevel.log, AlertLevel.notify, AlertLevel.review]
+
 
 async def recent_live_alert_exists(
     db: AsyncSession,
@@ -16,19 +19,23 @@ async def recent_live_alert_exists(
     camera_id: UUID,
     person_id: int,
     within_sec: float,
+    at_or_above: AlertLevel,
 ) -> bool:
-    """True if a live-threshold alert for this (camera, tracked person) already
-    landed within `within_sec`. Defends against a duplicate breach alert for the
-    same episode — e.g. a node retrying its push, or (paranoia) a stray
-    backend-pull while the node also pushes. Legitimate re-alerts are ≥ the
-    breach cooldown apart, so this never suppresses a genuine new episode."""
+    """True if a live-threshold alert at level >= `at_or_above` for this (camera,
+    tracked person) landed within `within_sec`. With the VLM-primary scan firing
+    every few seconds, this debounces repeats of the SAME-or-lower severity (so
+    the menu isn't flooded with "browsing"), while still letting an ESCALATION
+    through — e.g. a theft (review) right after a browsing (log) is NOT suppressed
+    because no recent review-level alert exists."""
     cutoff = datetime.now(UTC) - timedelta(seconds=within_sec)
+    wanted = _LEVEL_ORDER[_LEVEL_ORDER.index(at_or_above) :]
     stmt = (
         select(Alert.id)
         .where(
             Alert.camera_id == camera_id,
             Alert.person_id == person_id,
             Alert.triggered_by == AlertTrigger.live_threshold,
+            Alert.alert_level.in_(wanted),
             Alert.created_at >= cutoff,
         )
         .limit(1)
