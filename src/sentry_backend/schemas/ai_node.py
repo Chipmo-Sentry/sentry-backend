@@ -104,6 +104,15 @@ class VlmStatus(BaseModel):
     gpu_pct: int | None = Field(default=None, ge=0, le=100)
 
 
+class VlmActivity(BaseModel):
+    """VLM verify run history — proves the VLM HAS run on the GPU even though it's
+    event-driven (breach-only) and idle most of the time."""
+
+    count: int = Field(default=0, ge=0)
+    last_ago_sec: int | None = Field(default=None, ge=0)
+    last_latency_ms: int | None = Field(default=None, ge=0)
+
+
 class AiNodeHeartbeat(BaseModel):
     """Telemetry the node reports every ~60s."""
 
@@ -138,6 +147,7 @@ class AiNodeHeartbeat(BaseModel):
     # dashboard's expanded metrics panel. Stored in telemetry JSON.
     components: list[ComponentUsage] | None = Field(default=None, max_length=12)
     vlm: VlmStatus | None = None
+    vlm_activity: VlmActivity | None = None
     # Central-control feedback (ADR-0026): the VLM provider the node ACTUALLY uses
     # (effective), whether its model is reachable, and an error if not. Lets the
     # dashboard show applied-on-server vs applying vs error next to the desired
