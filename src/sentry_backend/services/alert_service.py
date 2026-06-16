@@ -8,8 +8,12 @@ def derive_alert_level(category: AlertCategory, confidence: float) -> AlertLevel
 
     Tuning knob — adjust thresholds as we learn from real feedback.
     """
+    # Browsing / low-confidence is NOT hidden: the node now surfaces every
+    # sustained breach (with its clip) so the operator can review it. These land
+    # at "log" (Бүртгэсэн) — visible in the menu but out of notify/review — so a
+    # detected episode is never silently dropped, just deprioritised.
     if category == AlertCategory.browsing or confidence < 0.30:
-        return AlertLevel.ignore
+        return AlertLevel.log
     if category == AlertCategory.other:
         return AlertLevel.log
     if category == AlertCategory.cart_pickup:
