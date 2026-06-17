@@ -16,6 +16,7 @@ class AlertCategory(enum.StrEnum):
     browsing = "browsing"
     cart_pickup = "cart_pickup"
     pocket_conceal = "pocket_conceal"
+    bag_conceal = "bag_conceal"
     other = "other"
 
 
@@ -64,6 +65,11 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     category: Mapped[AlertCategory] = mapped_column(
         Enum(AlertCategory, name="alert_category"), nullable=False
     )
+    # Multi-label: every action the VLM detected in the clip (ADR 2026-06-17).
+    # `category` above is the primary (most-severe) of these, kept for the level
+    # logic, analytics, Telegram, and RAG. Null on older rows / manual uploads →
+    # the UI falls back to [category].
+    actions: Mapped[list[str] | None] = mapped_column(ARRAY(String(32)), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     reasoning: Mapped[str] = mapped_column(Text, nullable=False)
     model_name: Mapped[str] = mapped_column(String(64), nullable=False)

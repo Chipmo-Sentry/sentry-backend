@@ -750,6 +750,7 @@ async def create_live_alert(
     mediamtx_path: str,
     clip_bytes: bytes,
     category: AlertCategory,
+    actions: list[str] | None = None,
     confidence: float,
     reasoning: str,
     model_name: str,
@@ -838,6 +839,8 @@ async def create_live_alert(
             store_id=cam_loaded.store_id,
             camera_id=cam_loaded.id,
             category=category,
+            # Fall back to the single primary for older nodes that send no list.
+            actions=actions or [category.value],
             confidence=confidence,
             reasoning=reasoning,
             model_name=model_name,
