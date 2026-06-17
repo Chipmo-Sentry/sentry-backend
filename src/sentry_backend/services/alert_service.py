@@ -18,7 +18,8 @@ def derive_alert_level(category: AlertCategory, confidence: float) -> AlertLevel
         return AlertLevel.log
     if category == AlertCategory.cart_pickup:
         return AlertLevel.log if confidence < 0.70 else AlertLevel.notify
-    if category == AlertCategory.pocket_conceal:
+    # Concealment (pocket OR bag) is the theft signal — both escalate the same way.
+    if category in (AlertCategory.pocket_conceal, AlertCategory.bag_conceal):
         if confidence >= 0.85:
             return AlertLevel.review
         if confidence >= 0.70:

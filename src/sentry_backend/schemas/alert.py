@@ -26,6 +26,9 @@ class AlertPublic(BaseModel):
     store_id: UUID | None
     camera_id: UUID | None
     category: AlertCategory
+    # Multi-label: all actions detected in the clip. Null on older rows; the UI
+    # falls back to [category]. `category` is the primary (most-severe) of these.
+    actions: list[str] | None = None
     confidence: float
     reasoning: str
     model_name: str
@@ -71,6 +74,9 @@ class LiveAlertCreate(BaseModel):
 
     camera_id: str = Field(min_length=1)  # Camera.mediamtx_path
     category: AlertCategory
+    # Multi-label: all actions the VLM detected. Optional for older nodes that
+    # only send `category`; the backend falls back to [category].
+    actions: list[AlertCategory] | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str = Field(min_length=1, max_length=2000)
     model_name: str = Field(min_length=1, max_length=64)

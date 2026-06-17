@@ -224,6 +224,7 @@ async def create_live_alert_from_node(
         mediamtx_path=body.camera_id,
         clip_bytes=clip_bytes,
         category=body.category,
+        actions=[a.value for a in body.actions] if body.actions else None,
         confidence=body.confidence,
         reasoning=body.reasoning,
         model_name=body.model_name,
