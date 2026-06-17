@@ -2,7 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID
 
 from pydantic import (
@@ -259,6 +259,161 @@ class AiNodePublic(BaseModel):
         if ls.tzinfo is None:
             ls = ls.replace(tzinfo=UTC)
         return datetime.now(UTC) - ls < NODE_ONLINE_WINDOW
+
+
+class OrgNodePublic(BaseModel):
+    """Org-scoped, camera-PROJECTED view of an AI node for the customer app.
+
+    AiNode has no organization_id — a node serves cameras across orgs and is
+    linked to an org ONLY through telemetry.cameras[].camera_id == Camera
+    .mediamtx_path. So this view (built by `build_org_node`) deliberately:
+      • returns ONLY the caller-org's cameras out of a (possibly shared) node,
+      • NEVER exposes the raw telemetry string (it carries other tenants'
+        camera ids) — only the safe whole-node gauges are projected through.
+    Contrast AiNodePublic (superadmin), which returns everything verbatim.
+    """
+
+    id: UUID
+    name: str | None
+    is_online: bool
+    last_seen_at: str | None
+    version: str | None
+    gpu: str | None
+    # Central-control: desired (DB) vs effective (last heartbeat) → applied/applying.
+    provider: str
+    provider_effective: str | None
+    provider_ready: bool | None
+    provider_error: str | None
+    breach_mode: str
+    breach_mode_effective: str | None
+    # Whole-node gauges (safe to share — not per-camera/per-tenant).
+    fps_inference: float | None
+    active_cameras: int | None
+    cpu_pct: float | None
+    ram_used_mb: int | None
+    ram_total_mb: int | None
+    gpu_pct: int | None
+    vram_used_mb: int | None
+    vram_total_mb: int | None
+    gpu_temp_c: int | None
+    vlm_activity: VlmActivity | None
+    vlm: VlmStatus | None
+    health: dict[str, bool] | None
+    # Per-camera health — FILTERED to the caller-org's mediamtx_paths only.
+    cameras: list[CameraHealth]
+
+
+def _iso(v: datetime | None) -> str | None:
+    if v is None:
+        return None
+    if v.tzinfo is None:
+        v = v.replace(tzinfo=UTC)
+    return v.isoformat()
+
+
+def build_org_node(node: "AiNodeLike", allowed_paths: set[str]) -> OrgNodePublic | None:
+    """Project an AiNode down to a single org's view.
+
+    Returns None when this node serves NONE of the org's cameras (so a shared
+    node never appears for an org that has no camera on it). `allowed_paths` is
+    the set of the org's Camera.mediamtx_path values.
+    """
+    telemetry = node.telemetry
+    obj: dict[str, object] = {}
+    if telemetry:
+        try:
+            parsed = json.loads(telemetry)
+            if isinstance(parsed, dict):
+                obj = parsed
+        except ValueError:
+            obj = {}
+
+    all_cams = parse_camera_health(telemetry) or []
+    org_cams = [c for c in all_cams if c.camera_id in allowed_paths]
+    if not org_cams:
+        # This node reports no camera that belongs to the caller's org → hide it.
+        return None
+
+    def _f(key: str) -> float | None:
+        v = obj.get(key)
+        return float(v) if isinstance(v, (int, float)) else None
+
+    def _i(key: str) -> int | None:
+        v = obj.get(key)
+        return int(v) if isinstance(v, (int, float)) else None
+
+    def _s(key: str) -> str | None:
+        v = obj.get(key)
+        return v if isinstance(v, str) else None
+
+    def _b(key: str) -> bool | None:
+        v = obj.get(key)
+        return v if isinstance(v, bool) else None
+
+    vlm_activity = None
+    if isinstance(obj.get("vlm_activity"), dict):
+        try:
+            vlm_activity = VlmActivity.model_validate(obj["vlm_activity"])
+        except ValidationError:
+            vlm_activity = None
+    vlm = None
+    if isinstance(obj.get("vlm"), dict):
+        try:
+            vlm = VlmStatus.model_validate(obj["vlm"])
+        except ValidationError:
+            vlm = None
+    health = obj.get("health")
+    health_map = (
+        {k: bool(v) for k, v in health.items() if isinstance(v, bool)}
+        if isinstance(health, dict)
+        else None
+    )
+
+    ls = node.last_seen_at
+    if ls is not None and ls.tzinfo is None:
+        ls = ls.replace(tzinfo=UTC)
+    is_online = ls is not None and (datetime.now(UTC) - ls) < NODE_ONLINE_WINDOW
+
+    return OrgNodePublic(
+        id=node.id,
+        name=node.name,
+        is_online=is_online,
+        last_seen_at=_iso(node.last_seen_at),
+        version=node.version,
+        gpu=node.gpu,
+        provider=node.provider,
+        provider_effective=_s("provider_effective"),
+        provider_ready=_b("provider_ready"),
+        provider_error=_s("provider_error"),
+        breach_mode=node.breach_mode,
+        breach_mode_effective=_s("breach_mode_effective"),
+        fps_inference=_f("fps_inference"),
+        active_cameras=_i("active_cameras"),
+        cpu_pct=_f("cpu_pct"),
+        ram_used_mb=_i("ram_used_mb"),
+        ram_total_mb=_i("ram_total_mb"),
+        gpu_pct=_i("gpu_pct"),
+        vram_used_mb=_i("vram_used_mb"),
+        vram_total_mb=_i("vram_total_mb"),
+        gpu_temp_c=_i("gpu_temp_c"),
+        vlm_activity=vlm_activity,
+        vlm=vlm,
+        health=health_map,
+        cameras=org_cams,
+    )
+
+
+class AiNodeLike(Protocol):
+    """Structural type for build_org_node — the AiNode ORM row satisfies it."""
+
+    id: UUID
+    name: str | None
+    version: str | None
+    gpu: str | None
+    provider: str
+    breach_mode: str
+    last_seen_at: datetime | None
+    telemetry: str | None
 
 
 class AiNodeUpdate(BaseModel):
