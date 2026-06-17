@@ -29,7 +29,7 @@ def _esc(value: str) -> str:
 
 def _format(lead: Lead) -> str:
     lines = [
-        "🟠 *Шинэ demo хүсэлт — Chipmo Sentry*",
+        "🟠 *Шинэ demo хүсэлт — Sentry*",
         f"✉️ {_esc(lead.email)}",
     ]
     if lead.name:

@@ -148,20 +148,20 @@ async def create_invitation(
     invite_url = f"{s.app_base_url.rstrip('/')}/accept-invite?token={raw}"
 
     org = await org_repo.get_org(db, org_id)
-    org_name = org.name if org else "Chipmo Sentry"
+    org_name = org.name if org else "Sentry"
     days = max(1, s.invite_ttl_hours // 24)
     emailed = await email_service.send_email(
         to=body.email,
-        subject=f"{org_name} — Chipmo Sentry урилга",
+        subject=f"{org_name} — Sentry урилга",
         body_text=(
             f"Сайн байна уу,\n\nТанд {org_name} байгууллагад нэгдэх урилга ирлээ. "
             f"Доорх холбоосоор орж нууц үгээ тохируулна уу:\n\n{invite_url}\n\n"
-            f"Холбоос {days} хоногийн дараа хүчингүй болно.\n\n— Chipmo Sentry"
+            f"Холбоос {days} хоногийн дараа хүчингүй болно.\n\n— Sentry"
         ),
         body_html=(
             f"<p>Сайн байна уу,</p><p>Танд <b>{org_name}</b> байгууллагад нэгдэх "
             f'урилга ирлээ.</p><p><a href="{invite_url}">Урилгыг хүлээн авах</a></p>'
-            f"<p>Холбоос {days} хоногийн дараа хүчингүй болно.</p><p>— Chipmo Sentry</p>"
+            f"<p>Холбоос {days} хоногийн дараа хүчингүй болно.</p><p>— Sentry</p>"
         ),
     )
     log.info("org.invite_created", org_id=str(org_id), email=body.email, emailed=emailed)
