@@ -116,6 +116,53 @@ async def patch_path(name: str, rtsp_source: str) -> bool:
     return False
 
 
+async def list_paths() -> dict[str, dict[str, Any]] | None:
+    """Read MediaMTX RUNTIME path state via GET /v3/paths/list.
+
+    Returns {path_name: {"ready": bool, "readers": int, "has_source": bool}} —
+    `ready` = a publisher is active and the stream is being served (i.e. video is
+    actually arriving at the cloud). Returns None when the API is disabled
+    (no MEDIAMTX_API_URL) or unreachable, so callers can show "unknown" instead
+    of faking "0 paths". Best-effort, never raises.
+    """
+    base = _api_base()
+    if not base:
+        return None
+    url = f"{base.rstrip('/')}/v3/paths/list"
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            page = 0
+            while True:
+                r = await client.get(
+                    url,
+                    params={"itemsPerPage": 1000, "page": page},
+                    headers=_headers(),
+                    auth=_auth(),
+                )
+                if r.status_code != 200:
+                    log.warning("mediamtx.list_failed", status=r.status_code, body=r.text[:200])
+                    return None
+                data = r.json()
+                for item in data.get("items", []):
+                    name = item.get("name")
+                    if not isinstance(name, str):
+                        continue
+                    readers = item.get("readers")
+                    out[name] = {
+                        "ready": bool(item.get("ready")),
+                        "readers": len(readers) if isinstance(readers, list) else 0,
+                        "has_source": item.get("source") is not None,
+                    }
+                page += 1
+                if page >= int(data.get("pageCount", 1)):
+                    break
+    except (httpx.HTTPError, TimeoutError, ValueError) as e:
+        log.warning("mediamtx.list_http_err", error=str(e))
+        return None
+    return out
+
+
 async def delete_path(name: str) -> bool:
     base = _api_base()
     if not base:
