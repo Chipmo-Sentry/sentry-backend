@@ -39,6 +39,23 @@ class AiNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     provider: Mapped[str] = mapped_column(String(64), default="qwen3-vl-4b", nullable=False)
     frame_skip: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    # Per-node YOLO + scan/VLM tuning (central control, like provider/breach_mode).
+    # The node polls these from /ai-nodes/config and hot-applies them to its
+    # running camera workers + verify path WITHOUT a restart. Until this shipped
+    # these lived only in the node's .env / hardcoded literals, so frame_skip was
+    # editable in the UI but never actually consumed; now the whole detection
+    # pipeline is operator-tunable from superadmin.
+    person_conf: Mapped[float] = mapped_column(Float, default=0.35, nullable=False)
+    item_conf: Mapped[float] = mapped_column(Float, default=0.40, nullable=False)
+    # Run the COCO item detector every Nth analyzed frame (items move slowly).
+    item_every_n: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    # Seconds between VLM scan ticks (the node hands the most-suspicious present
+    # person to the VLM at most this often).
+    scan_interval_sec: Mapped[float] = mapped_column(Float, default=3.0, nullable=False)
+    # Keyframes extracted from the breach clip and sent to the VLM per scan.
+    frames_per_clip: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # Max edge (px) each VLM keyframe is resized to before inference.
+    frame_max_dim: Mapped[int] = mapped_column(Integer, default=320, nullable=False)
     # Live-breach topology — the SINGLE source of truth for who creates breach
     # alerts (ADR-0026 central control, like `provider`). The node polls this and
     # hot-applies it; nothing on the node decides it locally any more, so the old
