@@ -127,3 +127,47 @@ def test_hides_node_serving_no_org_cameras(
     r = client.get("/api/v1/nodes")
     assert r.status_code == 200
     assert r.json() == []
+
+
+# --- GET /api/v1/nodes/{id}/metrics (org-ownership-checked) ------------------
+
+
+def _set_node(monkeypatch: pytest.MonkeyPatch, node: FakeNode | None) -> None:
+    async def _get(_db: object, _id: object) -> FakeNode | None:
+        return node
+
+    monkeypatch.setattr(ai_node_repo, "get_node", _get)
+
+
+def _set_metrics(monkeypatch: pytest.MonkeyPatch, rows: list[dict]) -> None:
+    async def _m(_db: object, _id: object, **_kw: object) -> list[dict]:
+        return rows
+
+    monkeypatch.setattr(ai_node_repo, "get_metrics", _m)
+
+
+def test_metrics_for_owned_node(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    node = FakeNode(telemetry=_telemetry([("cam-a", 4.8, "ok")]))
+    _set_cameras(monkeypatch, ["cam-a"])
+    _set_node(monkeypatch, node)
+    _set_metrics(monkeypatch, [{"ts": "2026-06-18T00:00:00+00:00", "gpu_pct": 99}])
+    r = client.get(f"/api/v1/nodes/{node.id}/metrics?range=1h")
+    assert r.status_code == 200
+    assert r.json() == [{"ts": "2026-06-18T00:00:00+00:00", "gpu_pct": 99}]
+
+
+def test_metrics_404_for_unowned_node(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The node exists but serves only ANOTHER org's camera → 404 (no leak).
+    node = FakeNode(telemetry=_telemetry([("cam-other", 4.8, "ok")]))
+    _set_cameras(monkeypatch, ["cam-a"])
+    _set_node(monkeypatch, node)
+    _set_metrics(monkeypatch, [{"ts": "x", "gpu_pct": 99}])
+    r = client.get(f"/api/v1/nodes/{node.id}/metrics")
+    assert r.status_code == 404
+
+
+def test_metrics_404_for_missing_node(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_cameras(monkeypatch, ["cam-a"])
+    _set_node(monkeypatch, None)
+    r = client.get(f"/api/v1/nodes/{uuid4()}/metrics")
+    assert r.status_code == 404
