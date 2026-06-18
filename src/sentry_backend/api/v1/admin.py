@@ -449,5 +449,11 @@ async def update_ai_node(
         provider=body.provider,
         frame_skip=body.frame_skip,
         breach_mode=body.breach_mode,
+        person_conf=body.person_conf,
+        item_conf=body.item_conf,
+        item_every_n=body.item_every_n,
+        scan_interval_sec=body.scan_interval_sec,
+        frames_per_clip=body.frames_per_clip,
+        frame_max_dim=body.frame_max_dim,
     )
     return AiNodePublic.model_validate(node)

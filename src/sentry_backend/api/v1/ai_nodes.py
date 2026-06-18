@@ -36,6 +36,12 @@ def _config(node: AiNode) -> AiNodeConfig:
         provider=node.provider,
         frame_skip=node.frame_skip,
         breach_mode=node.breach_mode,
+        person_conf=node.person_conf,
+        item_conf=node.item_conf,
+        item_every_n=node.item_every_n,
+        scan_interval_sec=node.scan_interval_sec,
+        frames_per_clip=node.frames_per_clip,
+        frame_max_dim=node.frame_max_dim,
     )
 
 

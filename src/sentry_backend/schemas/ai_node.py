@@ -40,6 +40,15 @@ class AiNodeConfig(BaseModel):
     # Live-breach topology (central control). "node_push" = node detects + cuts +
     # VLM-verifies + POSTs alerts; "off" = AI/overlay only, no alerts.
     breach_mode: str = "node_push"
+    # Per-node YOLO + scan/VLM tuning the node hot-applies (central control). All
+    # have defaults so an older backend response (without these keys) leaves the
+    # node on its built-in defaults.
+    person_conf: float = 0.35
+    item_conf: float = 0.40
+    item_every_n: int = 5
+    scan_interval_sec: float = 3.0
+    frames_per_clip: int = 1
+    frame_max_dim: int = 320
 
 
 class AiNodePairResult(BaseModel):
@@ -185,6 +194,14 @@ class AiNodePublic(BaseModel):
     provider: str
     frame_skip: int
     breach_mode: str
+    # Per-node YOLO + scan/VLM tuning (central control). Surfaced so the superadmin
+    # node dialog can pre-fill them on edit.
+    person_conf: float
+    item_conf: float
+    item_every_n: int
+    scan_interval_sec: float
+    frames_per_clip: int
+    frame_max_dim: int
     created_at: datetime
 
     @field_serializer("last_seen_at", "created_at")
@@ -424,3 +441,11 @@ class AiNodeUpdate(BaseModel):
     provider: str | None = Field(default=None, max_length=64)
     frame_skip: int | None = Field(default=None, ge=0, le=30)
     breach_mode: Literal["node_push", "off"] | None = None
+    # Per-node YOLO + scan/VLM tuning. Ranges keep an operator edit inside sane,
+    # GPU-safe bounds (conf as a probability; cadences/sizes positive).
+    person_conf: float | None = Field(default=None, ge=0.05, le=0.95)
+    item_conf: float | None = Field(default=None, ge=0.05, le=0.95)
+    item_every_n: int | None = Field(default=None, ge=1, le=30)
+    scan_interval_sec: float | None = Field(default=None, ge=0.5, le=60.0)
+    frames_per_clip: int | None = Field(default=None, ge=1, le=8)
+    frame_max_dim: int | None = Field(default=None, ge=160, le=1280)

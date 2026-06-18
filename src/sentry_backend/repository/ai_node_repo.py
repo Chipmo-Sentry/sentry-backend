@@ -209,6 +209,12 @@ async def update_node(
     provider: str | None = None,
     frame_skip: int | None = None,
     breach_mode: str | None = None,
+    person_conf: float | None = None,
+    item_conf: float | None = None,
+    item_every_n: int | None = None,
+    scan_interval_sec: float | None = None,
+    frames_per_clip: int | None = None,
+    frame_max_dim: int | None = None,
 ) -> AiNode:
     if name is not None:
         node.name = name
@@ -220,5 +226,17 @@ async def update_node(
         node.frame_skip = frame_skip
     if breach_mode is not None:
         node.breach_mode = breach_mode
+    if person_conf is not None:
+        node.person_conf = person_conf
+    if item_conf is not None:
+        node.item_conf = item_conf
+    if item_every_n is not None:
+        node.item_every_n = item_every_n
+    if scan_interval_sec is not None:
+        node.scan_interval_sec = scan_interval_sec
+    if frames_per_clip is not None:
+        node.frames_per_clip = frames_per_clip
+    if frame_max_dim is not None:
+        node.frame_max_dim = frame_max_dim
     await db.flush()
     return node
