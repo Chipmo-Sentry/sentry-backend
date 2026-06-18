@@ -24,6 +24,7 @@ from sentry_backend.api.v1 import cameras as cameras_v1
 from sentry_backend.api.v1 import clips as clips_v1
 from sentry_backend.api.v1 import events as events_v1
 from sentry_backend.api.v1 import feedback as feedback_v1
+from sentry_backend.api.v1 import ingest as ingest_v1
 from sentry_backend.api.v1 import internal as internal_v1
 from sentry_backend.api.v1 import leads as leads_v1
 from sentry_backend.api.v1 import nodes as nodes_v1
@@ -186,6 +187,7 @@ def create_app() -> FastAPI:
     app.include_router(agents_v1.router)
     app.include_router(ai_nodes_v1.router)
     app.include_router(nodes_v1.router)
+    app.include_router(ingest_v1.router)
     app.include_router(behaviors_v1.router)
     app.include_router(events_v1.router)
     app.include_router(ws_live.router)
