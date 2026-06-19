@@ -200,6 +200,14 @@ async def deactivate_node(db: AsyncSession, node: AiNode) -> None:
     await db.flush()
 
 
+async def delete_node(db: AsyncSession, node: AiNode) -> None:
+    """Hard-delete the node row. ai_node_metrics cascade (FK ondelete=CASCADE);
+    pairing codes keep their row with ai_node_id nulled (SET NULL); event_log
+    rows are untouched (ai_node_id has no FK). Cameras don't reference the node."""
+    await db.delete(node)
+    await db.flush()
+
+
 async def update_node(
     db: AsyncSession,
     node: AiNode,

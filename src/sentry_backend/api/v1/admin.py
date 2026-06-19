@@ -431,6 +431,21 @@ async def revoke_ai_node(
     await ai_node_repo.deactivate_node(db, node)
 
 
+@router.delete("/ai-nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_ai_node(
+    node_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> None:
+    """Hard-delete a node — removes it from the superadmin + org node lists.
+    Revoke only deactivates (row stays); this removes the row entirely for a
+    decommissioned node. Metrics cascade; pairing codes/event-log survive."""
+    node = await ai_node_repo.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI зангилаа олдсонгүй.")
+    await ai_node_repo.delete_node(db, node)
+
+
 @router.patch("/ai-nodes/{node_id}", response_model=AiNodePublic)
 async def update_ai_node(
     node_id: UUID,
