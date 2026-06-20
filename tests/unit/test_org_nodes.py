@@ -95,7 +95,12 @@ def test_gauges_and_central_control_projected() -> None:
 
 
 def test_is_online_from_last_seen() -> None:
-    fresh = FakeNode(telemetry=_telemetry([("cam-a", 4.8, "ok")]), last_seen_at=NOW)
+    # last_seen must be ~now (NODE_ONLINE_WINDOW is 5 min). Using the fixed module
+    # NOW constant here was a time-bomb: it only passed within 5 min of that date.
+    fresh = FakeNode(
+        telemetry=_telemetry([("cam-a", 4.8, "ok")]),
+        last_seen_at=datetime.now(UTC),
+    )
     assert build_org_node(fresh, {"cam-a"}).is_online is True  # type: ignore[union-attr]
 
     stale = FakeNode(
