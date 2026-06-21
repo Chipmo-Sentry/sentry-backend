@@ -5,14 +5,16 @@ Two audiences:
   • Agent (agent JWT):        pair, register cameras, heartbeat.
 """
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.agent import Agent
+from sentry_backend.db.models.alert import AlertCategory, AlertLevel, AlertTrigger
 from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.db.models.organization import OrganizationMember, OrgRole
 from sentry_backend.db.models.store import Store
@@ -21,7 +23,7 @@ from sentry_backend.deps.agent_auth import get_current_agent
 from sentry_backend.deps.auth import get_current_user
 from sentry_backend.deps.db import get_db
 from sentry_backend.ratelimit import limiter
-from sentry_backend.repository import agent_repo, camera_repo
+from sentry_backend.repository import agent_repo, alert_repo, camera_repo, clip_repo
 from sentry_backend.schemas.agent import (
     AgentCameraCreate,
     AgentCameraUpdate,
@@ -31,10 +33,13 @@ from sentry_backend.schemas.agent import (
     AgentStreamConfig,
     PairingCodePublic,
 )
+from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.schemas.camera import CameraPublic
 from sentry_backend.schemas.edge import EdgeConfigPayload
 from sentry_backend.security import create_agent_token
-from sentry_backend.services import event_log, live_provision
+from sentry_backend.services import ai_service, event_log, live_provision
+from sentry_backend.services.alert_service import derive_alert_level
+from sentry_backend.services.clip_service import ClipTooLargeError, save_upload_to_disk
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
@@ -325,6 +330,101 @@ async def agent_edge_config(
     defaults for any field omitted here, so this stays forward-compatible.
     """
     return EdgeConfigPayload()
+
+
+@router.post("/agent/edge/clips", response_model=AlertPublic, status_code=status.HTTP_201_CREATED)
+async def agent_edge_clip(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
+    clip: Annotated[UploadFile, File()],
+    camera_uuid: Annotated[UUID, Form()],
+    risk_pct: Annotated[float, Form()] = 0.0,
+    behaviors: Annotated[str, Form()] = "",
+    started_at: Annotated[float, Form()] = 0.0,
+    ended_at: Annotated[float, Form()] = 0.0,
+) -> AlertPublic:
+    """Edge Stage-1 (ADR-0029): the store agent ran YOLO + behaviour LOCALLY and
+    uploads ONE suspicious clip. We store it, get the VLM verdict from sentry-ai
+    (bytes-forward — the GPU node can't read this host's disk), and create the
+    alert. If the VLM is unavailable we still create a log-level behaviour alert
+    so a flagged event is never lost (ADR §8.4); the clip is stored either way.
+    """
+    cam = await camera_repo.get_camera_for_org(db, camera_uuid, agent.organization_id)
+    if cam is None or cam.store_id != agent.store_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")
+
+    try:
+        storage_path, size_bytes, sha256 = await save_upload_to_disk(
+            clip, organization_id=agent.organization_id
+        )
+    except ClipTooLargeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Клипийн хэмжээ хэтэрсэн байна.",
+        ) from e
+
+    captured = datetime.fromtimestamp(started_at, tz=UTC) if started_at else datetime.now(UTC)
+    clip_row = await clip_repo.create_clip(
+        db,
+        organization_id=agent.organization_id,
+        store_id=agent.store_id,
+        camera_id=cam.id,
+        captured_at=captured,
+        duration_sec=max(0.0, ended_at - started_at),
+        storage_path=str(storage_path),
+        file_size_bytes=size_bytes,
+        sha256=sha256,
+    )
+    await agent_repo.touch_last_seen(db, agent)
+    await db.commit()
+
+    behaviors_list = [b for b in behaviors.split(",") if b]
+    verdict = await ai_service.verify_edge_clip(storage_path, store_id=str(agent.store_id))
+
+    # Defaults = the VLM-unavailable fallback (behaviour-only, log level).
+    parsed = False
+    category = AlertCategory.other
+    confidence = max(0.0, min(1.0, risk_pct / 100.0))
+    reasoning = "VLM боломжгүй — edge зан төлөвөөр (clip хадгалсан)."
+    model_name = "edge-behaviour"
+    latency_ms = 0
+    embedding: list[float] | None = None
+    if verdict is not None:
+        try:
+            category = AlertCategory(str(verdict["category"]))
+            confidence = float(verdict["confidence"])  # type: ignore[arg-type]
+            reasoning = str(verdict.get("reasoning", ""))
+            model_name = str(verdict.get("model_name", "edge"))
+            latency_ms = int(verdict["inference_latency_ms"])  # type: ignore[call-overload]
+            emb = verdict.get("embedding")
+            embedding = [float(x) for x in emb] if isinstance(emb, list) else None
+            parsed = True
+        except (KeyError, ValueError, TypeError):
+            category = AlertCategory.other
+            confidence = max(0.0, min(1.0, risk_pct / 100.0))
+            reasoning = "VLM хариу буруу — edge зан төлөвөөр."
+            embedding = None
+
+    alert_level = derive_alert_level(category, confidence) if parsed else AlertLevel.log
+    alert = await alert_repo.create_alert(
+        db,
+        clip_id=clip_row.id,
+        organization_id=agent.organization_id,
+        store_id=agent.store_id,
+        camera_id=cam.id,
+        category=category,
+        confidence=confidence,
+        reasoning=reasoning,
+        model_name=model_name,
+        alert_level=alert_level,
+        inference_latency_ms=latency_ms,
+        triggered_by=AlertTrigger.edge_pc_upload,
+        peak_risk_pct=risk_pct,
+        triggered_behaviors=behaviors_list or None,
+        embedding=embedding,
+    )
+    await db.commit()
+    return AlertPublic.model_validate(alert)
 
 
 @router.post("/agent/heartbeat", status_code=status.HTTP_204_NO_CONTENT)
