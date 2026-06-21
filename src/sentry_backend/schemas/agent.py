@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from sentry_backend.db.models.camera import ComputeTier
 from sentry_backend.schemas.camera import MEDIAMTX_PATH_PATTERN
 
 
@@ -56,6 +57,8 @@ class AgentCameraCreate(BaseModel):
     # Default 11 = yellow band (matches the Camera model). The agent already sends
     # 11; this fallback ensures an older agent that omits it isn't stuck at deep-red.
     risk_threshold: float = Field(default=11.0, ge=0.0, le=100.0)
+    # ADR-0029 — compute tier; default cloud. An older agent that omits it stays cloud.
+    compute_tier: ComputeTier = ComputeTier.cloud
 
 
 class AgentCameraUpdate(BaseModel):
@@ -68,6 +71,7 @@ class AgentCameraUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     rtsp_url: str | None = Field(default=None, min_length=1)
     risk_threshold: float | None = Field(default=None, ge=0.0, le=100.0)
+    compute_tier: ComputeTier | None = None
 
 
 class AgentStreamConfig(BaseModel):

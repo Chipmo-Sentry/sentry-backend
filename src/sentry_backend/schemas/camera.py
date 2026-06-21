@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from sentry_backend.db.models.camera import Camera
+from sentry_backend.db.models.camera import Camera, ComputeTier
 
 # mediamtx_path flows into filesystem paths (clip_cutter recordings root) and
 # the MediaMTX control-API URL, so it MUST be a safe slug — lowercase
@@ -29,6 +29,9 @@ class CameraCreate(BaseModel):
     # Default 11 = yellow band (matches the Camera model + the agent): cast a wide
     # net and let the VLM filter "browsing". Per-camera tunable in the web UI.
     risk_threshold: float = Field(default=11.0, ge=0.0, le=100.0)
+    # ADR-0029 — compute tier (cloud | edge_pc | edge_device); default cloud keeps
+    # the existing cloud-pull path. Edge tiers skip the cloud live worker.
+    compute_tier: ComputeTier = ComputeTier.cloud
 
 
 class CameraUpdate(BaseModel):
@@ -39,6 +42,7 @@ class CameraUpdate(BaseModel):
     enabled: bool | None = None
     mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
     risk_threshold: float | None = Field(default=None, ge=0.0, le=100.0)
+    compute_tier: ComputeTier | None = None
 
 
 class StreamTokenResponse(BaseModel):
@@ -62,6 +66,9 @@ class CameraPublic(BaseModel):
     # L5 live-pipeline fields
     mediamtx_path: str | None = None
     risk_threshold: float = 11.0
+    # ADR-0029 — compute tier + the derived routing flag (cloud | edge).
+    compute_tier: ComputeTier = ComputeTier.cloud
+    topology_mode: str = "cloud"
 
     @classmethod
     def from_orm_camera(cls, camera: Camera) -> "CameraPublic":
@@ -76,4 +83,6 @@ class CameraPublic(BaseModel):
             created_at=camera.created_at,
             mediamtx_path=camera.mediamtx_path,
             risk_threshold=camera.risk_threshold,
+            compute_tier=ComputeTier(camera.compute_tier),
+            topology_mode=camera.topology_mode,
         )
