@@ -53,3 +53,14 @@ def test_reasoning_is_truncated() -> None:
     # 300-char cap on the reasoning line keeps Telegram payloads sane.
     assert "x" * 300 in msg
     assert "x" * 301 not in msg
+
+
+def test_edge_pc_upload_message_is_suspicion_not_breach() -> None:
+    # ADR-0029 I2: an edge clip alert is a suspicion (🔔), not a live breach (🚨),
+    # and has no person/risk line (the edge agent doesn't send a person id).
+    msg = _format(
+        _alert(triggered_by=AlertTrigger.edge_pc_upload, person_id=None, peak_risk_pct=None)
+    )
+    assert "Сэжигтэй үйлдэл" in msg
+    assert "Шууд сэрэмжлүүлэг" not in msg
+    assert "Хүн #" not in msg

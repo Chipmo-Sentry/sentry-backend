@@ -43,7 +43,8 @@ from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.schemas.camera import CameraPublic
 from sentry_backend.schemas.edge import EdgeConfigPayload, merged_edge_payload
 from sentry_backend.security import create_agent_token
-from sentry_backend.services import ai_service, event_log, live_provision
+from sentry_backend.services import ai_service, alert_notify, event_log, live_provision
+from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.clip_service import ClipTooLargeError, save_upload_to_disk
 from sentry_backend.settings import get_settings
@@ -436,8 +437,15 @@ async def agent_edge_clip(
         triggered_behaviors=behaviors_list or None,
         embedding=embedding,
     )
+    alert_public = AlertPublic.model_validate(alert)
+    # I2 — best-effort Telegram for actionable edge alerts (gated to notify/review
+    # inside notify_alert; the store lookup uses this session).
+    await alert_notify.notify_alert(db, alert)
     await db.commit()
-    return AlertPublic.model_validate(alert)
+    # I1 — push to the org's SSE subscribers so edge alerts appear live on the
+    # dashboard exactly like cloud-path (verify_clip_with_ai) alerts.
+    await get_broker().publish(alert_public.organization_id, alert_public.model_dump(mode="json"))
+    return alert_public
 
 
 @router.post("/agent/heartbeat", status_code=status.HTTP_204_NO_CONTENT)
