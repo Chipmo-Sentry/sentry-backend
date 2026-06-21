@@ -32,6 +32,7 @@ from sentry_backend.schemas.agent import (
     PairingCodePublic,
 )
 from sentry_backend.schemas.camera import CameraPublic
+from sentry_backend.schemas.edge import EdgeConfigPayload
 from sentry_backend.security import create_agent_token
 from sentry_backend.services import event_log, live_provision
 from sentry_backend.settings import get_settings
@@ -306,6 +307,19 @@ async def agent_stream_config(
         publish_user=s.mediamtx_publish_user,
         publish_pass=s.mediamtx_publish_pass,
     )
+
+
+@router.get("/agent/edge-config", response_model=EdgeConfigPayload)
+async def agent_edge_config(
+    _agent: Annotated[Agent, Depends(get_current_agent)],
+) -> EdgeConfigPayload:
+    """Edge Stage-1 tunables for the store agent's config-poller (ADR-0029).
+
+    v1 serves the defaults; a per-store EdgeConfig override + version bump lands
+    with the superadmin EdgeConfig CRUD. The agent's `from_dict` keeps its own
+    defaults for any field omitted here, so this stays forward-compatible.
+    """
+    return EdgeConfigPayload()
 
 
 @router.post("/agent/heartbeat", status_code=status.HTTP_204_NO_CONTENT)
