@@ -18,6 +18,8 @@ M2+ migration: sentry-ai posts to /api/v1/internal/alerts instead (already
 exists, uses service-token auth), so backend doesn't have to wait for VLM.
 For M1 the simpler sync-from-backend model is fine."""
 
+import asyncio
+from pathlib import Path
 from uuid import UUID
 
 import httpx
@@ -111,6 +113,47 @@ async def verify_clip_with_ai(clip_id: UUID) -> None:
         await _verify_inner(clip_id, settings.sentry_ai_url, settings.sentry_ai_timeout_sec)
     except Exception as e:  # noqa: BLE001 — background tasks must never raise
         log.exception("verify task crashed", clip_id=str(clip_id), error=str(e))
+
+
+async def verify_edge_clip(
+    clip_path: Path,
+    *,
+    store_id: str | None = None,
+    rag_query: str | None = None,
+    provider: str | None = None,
+) -> dict[str, object] | None:
+    """POST an edge clip's BYTES to sentry-ai ``/v1/edge-clip-upload`` (multipart)
+    and return the VLM verdict dict, or None if sentry-ai is unset / unreachable /
+    non-200.
+
+    Bytes transport (not a clip_path) because the GPU node and this backend run on
+    different hosts (ADR-0029) — sentry-ai cannot read the backend's disk.
+    """
+    settings = get_settings()
+    if not settings.sentry_ai_url:
+        log.warning("sentry_ai_url not configured, skipping edge verify")
+        return None
+
+    token = settings.sentry_ai_service_token
+    headers = {"Authorization": f"Bearer {token}"} if token else None
+    form = {
+        k: v
+        for k, v in {"store_id": store_id, "rag_query": rag_query, "provider": provider}.items()
+        if v is not None
+    }
+    url = f"{settings.sentry_ai_url.rstrip('/')}/v1/edge-clip-upload"
+    try:
+        clip_bytes = await asyncio.to_thread(clip_path.read_bytes)
+        files = {"clip": (clip_path.name, clip_bytes, "video/mp4")}
+        async with httpx.AsyncClient(timeout=settings.sentry_ai_timeout_sec) as client:
+            resp = await client.post(url, data=form, files=files, headers=headers)
+    except (httpx.HTTPError, TimeoutError, OSError) as e:
+        log.warning("edge verify call failed", error=str(e))
+        return None
+    if resp.status_code != 200:
+        log.error("sentry-ai edge-clip non-200", status=resp.status_code, body=resp.text[:300])
+        return None
+    return resp.json()  # type: ignore[no-any-return]
 
 
 async def _verify_inner(clip_id: UUID, ai_base_url: str, timeout_sec: int) -> None:
