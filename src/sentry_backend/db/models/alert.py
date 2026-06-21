@@ -30,6 +30,7 @@ class AlertLevel(enum.StrEnum):
 class AlertTrigger(enum.StrEnum):
     manual_upload = "manual_upload"  # human uploaded mp4 via /clips/upload
     live_threshold = "live_threshold"  # live risk_pct crossed camera.risk_threshold
+    edge_pc_upload = "edge_pc_upload"  # edge store PC ran Stage-1 + uploaded the clip (ADR-0029)
 
 
 class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
