@@ -207,6 +207,11 @@ class Settings(BaseSettings):
     # Per-IP rate limits on credential/pairing brute-force surfaces.
     login_rate_limit: str = "10/minute"
     pair_rate_limit: str = "10/minute"
+    # I4 (ADR-0029 §12): per-IP cap on edge suspicious-clip uploads
+    # (POST /agent/edge/clips). Generous — a busy store may flag several events a
+    # minute — but bounds a misbehaving/compromised agent flooding storage + the
+    # GPU verify queue. Keyed per client IP like the limits above.
+    edge_clip_rate_limit: str = "60/minute"
 
     # Number of trusted reverse proxies in front of the backend. The rate-limit
     # key takes the X-Forwarded-For entry this many hops from the RIGHT — the IP

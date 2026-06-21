@@ -333,7 +333,9 @@ async def agent_edge_config(
 
 
 @router.post("/agent/edge/clips", response_model=AlertPublic, status_code=status.HTTP_201_CREATED)
+@limiter.limit(lambda: get_settings().edge_clip_rate_limit)
 async def agent_edge_clip(
+    request: Request,  # noqa: ARG001 — required by slowapi's limiter
     db: Annotated[AsyncSession, Depends(get_db)],
     agent: Annotated[Agent, Depends(get_current_agent)],
     clip: Annotated[UploadFile, File()],
