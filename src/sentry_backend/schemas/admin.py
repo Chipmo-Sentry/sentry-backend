@@ -1,8 +1,11 @@
 """Super-admin dashboard + user management schemas."""
 
-from pydantic import BaseModel, ConfigDict
+from datetime import UTC, datetime
+
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 from sentry_backend.db.models.organization import OrgRole
+from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.schemas.auth import UserPublic
 
 
@@ -57,3 +60,20 @@ def would_self_lockout(
     if update.is_super_admin is False:
         return True
     return update.is_active is False
+
+
+class AdminAlertRow(AlertPublic):
+    """One alert enriched with org/store/camera display names for the superadmin
+    pipeline ("Урсгал") page. Each row is one problematic clip's full journey:
+    camera → behaviours (triggered_*) → VLM (reasoning/confidence/model) →
+    decision (alert_level/category) → review (feedback_verdict)."""
+
+    organization_name: str
+    store_name: str | None = None
+    camera_name: str | None = None
+
+    @field_serializer("created_at")
+    def _ser_created(self, v: datetime) -> str:
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=UTC)
+        return v.isoformat()

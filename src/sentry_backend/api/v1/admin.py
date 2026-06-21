@@ -14,12 +14,20 @@ from sentry_backend.db.models.alert import Alert
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.db.models.feedback import Feedback
+from sentry_backend.db.models.organization import Organization
 from sentry_backend.db.models.store import Store
 from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import require_super_admin
 from sentry_backend.deps.db import get_db
-from sentry_backend.repository import ai_node_repo, lead_repo, org_repo, user_repo
+from sentry_backend.repository import (
+    ai_node_repo,
+    feedback_repo,
+    lead_repo,
+    org_repo,
+    user_repo,
+)
 from sentry_backend.schemas.admin import (
+    AdminAlertRow,
     AdminStats,
     OrgMemberPublic,
     UserAdminUpdate,
@@ -30,6 +38,7 @@ from sentry_backend.schemas.ai_node import (
     AiNodePublic,
     AiNodeUpdate,
 )
+from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.schemas.auth import UserPublic
 from sentry_backend.schemas.lead import LeadPublic, LeadUpdate
 from sentry_backend.schemas.org import (
@@ -107,6 +116,46 @@ async def alert_analytics(
         "by_level": by_level,
         "by_day": by_day,
     }
+
+
+@router.get("/alerts", response_model=list[AdminAlertRow])
+async def list_alerts_admin(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[AdminAlertRow]:
+    """Recent alerts across ALL orgs for the superadmin pipeline ("Урсгал") page.
+
+    Each row is one problematic clip's end-to-end journey — camera → behaviours
+    (triggered_*) → VLM (reasoning/confidence/model) → decision (alert_level/
+    category) → review (feedback_verdict) — enriched with org/store/camera display
+    names. Newest first. Filtering is done client-side over the fetched window."""
+    stmt = (
+        select(Alert, Organization.name, Store.name, Camera.name)
+        .join(Organization, Alert.organization_id == Organization.id)
+        .outerjoin(Store, Alert.store_id == Store.id)
+        .outerjoin(Camera, Alert.camera_id == Camera.id)
+        .order_by(Alert.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = (await db.execute(stmt)).all()
+    alerts = [row[0] for row in rows]
+    verdicts = await feedback_repo.latest_verdicts_for_alerts(db, [a.id for a in alerts])
+    out: list[AdminAlertRow] = []
+    for alert, org_name, store_name, cam_name in rows:
+        base = AlertPublic.model_validate(alert)
+        base.feedback_verdict = verdicts.get(alert.id)
+        out.append(
+            AdminAlertRow(
+                **base.model_dump(),
+                organization_name=org_name,
+                store_name=store_name,
+                camera_name=cam_name,
+            )
+        )
+    return out
 
 
 @router.get("/analytics/feedback")
