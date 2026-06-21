@@ -8,6 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel, AlertTrigger
+from sentry_backend.db.models.camera import Camera
+from sentry_backend.db.models.organization import Organization
+from sentry_backend.db.models.store import Store
 
 # Severity order (low → high) for debounce comparisons.
 _LEVEL_ORDER = [AlertLevel.ignore, AlertLevel.log, AlertLevel.notify, AlertLevel.review]
@@ -78,6 +81,25 @@ async def list_alerts_for_org(
     stmt = stmt.order_by(Alert.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def list_recent_admin(
+    db: AsyncSession, *, limit: int = 100, offset: int = 0
+) -> list[tuple[Alert, str, str | None, str | None]]:
+    """Recent alerts across ALL orgs (super-admin pipeline view), each joined to
+    its org / store / camera display names. Returns
+    ``(alert, org_name, store_name, camera_name)`` rows, newest first."""
+    stmt = (
+        select(Alert, Organization.name, Store.name, Camera.name)
+        .join(Organization, Alert.organization_id == Organization.id)
+        .outerjoin(Store, Alert.store_id == Store.id)
+        .outerjoin(Camera, Alert.camera_id == Camera.id)
+        .order_by(Alert.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = await db.execute(stmt)
+    return [(a, o, s, c) for a, o, s, c in rows.all()]
 
 
 async def create_alert(

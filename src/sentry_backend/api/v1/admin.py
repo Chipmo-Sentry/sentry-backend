@@ -14,13 +14,13 @@ from sentry_backend.db.models.alert import Alert
 from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.db.models.feedback import Feedback
-from sentry_backend.db.models.organization import Organization
 from sentry_backend.db.models.store import Store
 from sentry_backend.db.models.user import User
 from sentry_backend.deps.auth import require_super_admin
 from sentry_backend.deps.db import get_db
 from sentry_backend.repository import (
     ai_node_repo,
+    alert_repo,
     feedback_repo,
     lead_repo,
     org_repo,
@@ -131,16 +131,7 @@ async def list_alerts_admin(
     (triggered_*) → VLM (reasoning/confidence/model) → decision (alert_level/
     category) → review (feedback_verdict) — enriched with org/store/camera display
     names. Newest first. Filtering is done client-side over the fetched window."""
-    stmt = (
-        select(Alert, Organization.name, Store.name, Camera.name)
-        .join(Organization, Alert.organization_id == Organization.id)
-        .outerjoin(Store, Alert.store_id == Store.id)
-        .outerjoin(Camera, Alert.camera_id == Camera.id)
-        .order_by(Alert.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    rows = (await db.execute(stmt)).all()
+    rows = await alert_repo.list_recent_admin(db, limit=limit, offset=offset)
     alerts = [row[0] for row in rows]
     verdicts = await feedback_repo.latest_verdicts_for_alerts(db, [a.id for a in alerts])
     out: list[AdminAlertRow] = []
