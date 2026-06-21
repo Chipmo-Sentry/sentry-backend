@@ -4,7 +4,13 @@ keeps its own defaults for any field the backend omits, so drift is silent)."""
 
 from __future__ import annotations
 
-from sentry_backend.schemas.edge import EdgeConfigPayload
+import pytest
+
+from sentry_backend.schemas.edge import (
+    EdgeConfigOverridesIn,
+    EdgeConfigPayload,
+    merged_edge_payload,
+)
 
 # The 24 tunables the agent's EdgeConfig defines (besides `version`).
 _AGENT_FIELDS = {
@@ -63,3 +69,40 @@ def test_partial_override_keeps_other_defaults() -> None:
     assert c.person_conf == 0.5
     assert c.version == 7
     assert c.item_conf == 0.40  # untouched
+
+
+# ── I3: per-store merge + write validation ──────────────────────────────────
+
+
+def test_merged_payload_applies_overrides_and_version() -> None:
+    p = merged_edge_payload(5, {"person_conf": 0.6, "frame_skip": 2})
+    assert p.version == 5
+    assert p.person_conf == 0.6
+    assert p.frame_skip == 2
+    assert p.item_conf == 0.40  # untouched default
+
+
+def test_merged_payload_drops_unknown_keys() -> None:
+    p = merged_edge_payload(3, {"bogus": 1, "person_conf": 0.5})
+    assert p.person_conf == 0.5
+    assert not hasattr(p, "bogus")
+
+
+def test_merged_payload_invalid_value_falls_back_to_defaults() -> None:
+    # A hand-edited bad value must not 500 the agent poll — fall back to defaults
+    # (version preserved).
+    p = merged_edge_payload(4, {"frame_skip": "not-an-int"})
+    assert p.version == 4
+    assert p.frame_skip == 3  # default
+
+
+def test_merged_payload_none_overrides() -> None:
+    p = merged_edge_payload(1, None)
+    assert p == EdgeConfigPayload()
+
+
+def test_overrides_in_excludes_unset_and_forbids_unknown() -> None:
+    body = EdgeConfigOverridesIn(person_conf=0.5, band_red=80.0)
+    assert body.model_dump(exclude_none=True) == {"person_conf": 0.5, "band_red": 80.0}
+    with pytest.raises(ValueError):  # extra="forbid"
+        EdgeConfigOverridesIn(bogus=1)  # type: ignore[call-arg]

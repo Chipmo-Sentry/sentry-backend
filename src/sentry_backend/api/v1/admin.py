@@ -21,6 +21,7 @@ from sentry_backend.deps.db import get_db
 from sentry_backend.repository import (
     ai_node_repo,
     alert_repo,
+    edge_config_repo,
     feedback_repo,
     lead_repo,
     org_repo,
@@ -40,6 +41,11 @@ from sentry_backend.schemas.ai_node import (
 )
 from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.schemas.auth import UserPublic
+from sentry_backend.schemas.edge import (
+    EdgeConfigAdminView,
+    EdgeConfigOverridesIn,
+    merged_edge_payload,
+)
 from sentry_backend.schemas.lead import LeadPublic, LeadUpdate
 from sentry_backend.schemas.org import (
     OrganizationCreate,
@@ -512,3 +518,58 @@ async def update_ai_node(
         frame_max_dim=body.frame_max_dim,
     )
     return AiNodePublic.model_validate(node)
+
+
+# ── Per-store edge config (ADR-0029 I3 / I9) ────────────────────────────────
+
+
+async def _require_store(db: AsyncSession, store_id: UUID) -> Store:
+    store = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+    return store
+
+
+@router.get("/stores/{store_id}/edge-config", response_model=EdgeConfigAdminView)
+async def get_store_edge_config(
+    store_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> EdgeConfigAdminView:
+    """The store's edge tunable overrides + version + the effective merged config
+    the agent would receive."""
+    await _require_store(db, store_id)
+    row = await edge_config_repo.get_for_store(db, store_id)
+    version = row.version if row else 1
+    overrides = row.overrides if row else {}
+    return EdgeConfigAdminView(
+        store_id=str(store_id),
+        version=version,
+        overrides=overrides,
+        updated_at=row.updated_at if row else None,
+        effective=merged_edge_payload(version, overrides),
+    )
+
+
+@router.put("/stores/{store_id}/edge-config", response_model=EdgeConfigAdminView)
+async def set_store_edge_config(
+    store_id: UUID,
+    body: EdgeConfigOverridesIn,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> EdgeConfigAdminView:
+    """Set the store's edge tunable overrides (partial); bumps `version` so the
+    store agents re-apply. An empty body resets to the agent defaults (the version
+    still bumps, so the agent picks up the reset)."""
+    await _require_store(db, store_id)
+    overrides = body.model_dump(exclude_none=True)
+    row = await edge_config_repo.set_overrides(db, store_id, overrides)
+    await db.commit()
+    await db.refresh(row)  # load server-side updated_at
+    return EdgeConfigAdminView(
+        store_id=str(store_id),
+        version=row.version,
+        overrides=row.overrides,
+        updated_at=row.updated_at,
+        effective=merged_edge_payload(row.version, row.overrides),
+    )

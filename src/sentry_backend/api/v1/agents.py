@@ -23,7 +23,13 @@ from sentry_backend.deps.agent_auth import get_current_agent
 from sentry_backend.deps.auth import get_current_user
 from sentry_backend.deps.db import get_db
 from sentry_backend.ratelimit import limiter
-from sentry_backend.repository import agent_repo, alert_repo, camera_repo, clip_repo
+from sentry_backend.repository import (
+    agent_repo,
+    alert_repo,
+    camera_repo,
+    clip_repo,
+    edge_config_repo,
+)
 from sentry_backend.schemas.agent import (
     AgentCameraCreate,
     AgentCameraUpdate,
@@ -35,7 +41,7 @@ from sentry_backend.schemas.agent import (
 )
 from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.schemas.camera import CameraPublic
-from sentry_backend.schemas.edge import EdgeConfigPayload
+from sentry_backend.schemas.edge import EdgeConfigPayload, merged_edge_payload
 from sentry_backend.security import create_agent_token
 from sentry_backend.services import ai_service, event_log, live_provision
 from sentry_backend.services.alert_service import derive_alert_level
@@ -321,15 +327,20 @@ async def agent_stream_config(
 
 @router.get("/agent/edge-config", response_model=EdgeConfigPayload)
 async def agent_edge_config(
-    _agent: Annotated[Agent, Depends(get_current_agent)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
 ) -> EdgeConfigPayload:
-    """Edge Stage-1 tunables for the store agent's config-poller (ADR-0029).
+    """Edge Stage-1 tunables for the store agent's config-poller (ADR-0029 I3).
 
-    v1 serves the defaults; a per-store EdgeConfig override + version bump lands
-    with the superadmin EdgeConfig CRUD. The agent's `from_dict` keeps its own
-    defaults for any field omitted here, so this stays forward-compatible.
+    Returns the store's overrides merged over the defaults, with a monotonic
+    `version` the agent uses to re-apply only on a real change. A store with no
+    override row serves the defaults at version 1. The agent's `from_dict` keeps
+    its own defaults for any omitted field, so this stays forward-compatible.
     """
-    return EdgeConfigPayload()
+    row = await edge_config_repo.get_for_store(db, agent.store_id)
+    if row is None:
+        return EdgeConfigPayload()
+    return merged_edge_payload(row.version, row.overrides)
 
 
 @router.post("/agent/edge/clips", response_model=AlertPublic, status_code=status.HTTP_201_CREATED)
