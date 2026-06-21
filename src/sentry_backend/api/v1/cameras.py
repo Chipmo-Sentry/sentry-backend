@@ -54,6 +54,7 @@ async def create_camera(
         enabled=body.enabled,
         mediamtx_path=body.mediamtx_path,
         risk_threshold=body.risk_threshold,
+        compute_tier=body.compute_tier.value,
     )
     if cam is None:
         raise HTTPException(
@@ -63,7 +64,9 @@ async def create_camera(
     # Commit before MediaMTX sync so the path exists in DB even if MediaMTX
     # is unreachable (operator can restart MediaMTX to pick up later).
     await db.commit()
-    if cam.mediamtx_path and body.rtsp_url:
+    # ADR-0029: edge cameras run Stage-1 locally — skip the cloud live worker +
+    # MediaMTX pull. Only cloud-tier cameras provision the cloud pipeline.
+    if cam.topology_mode == "cloud" and cam.mediamtx_path and body.rtsp_url:
         await live_provision.provision(
             cam.mediamtx_path,
             body.rtsp_url,
@@ -139,6 +142,7 @@ async def update_camera(
         enabled=body.enabled,
         mediamtx_path=body.mediamtx_path,
         risk_threshold=body.risk_threshold,
+        compute_tier=body.compute_tier.value if body.compute_tier else None,
     )
     await db.commit()
 
@@ -146,7 +150,12 @@ async def update_camera(
     # MediaMTX + AI worker for the current path/enabled state.
     if old_path and old_path != cam.mediamtx_path:
         await live_provision.deprovision(old_path)
-    if cam.mediamtx_path:
+    if cam.topology_mode != "cloud":
+        # ADR-0029: edge cameras run Stage-1 locally — never a cloud worker.
+        # Tear one down in case the camera was just switched cloud → edge.
+        if cam.mediamtx_path:
+            await live_provision.deprovision(cam.mediamtx_path)
+    elif cam.mediamtx_path:
         rtsp = await camera_repo.decrypt_rtsp_url(cam)
         if rtsp:
             await live_provision.provision(

@@ -196,6 +196,7 @@ async def agent_register_camera(
         enabled=True,
         mediamtx_path=body.mediamtx_path,
         risk_threshold=body.risk_threshold,
+        compute_tier=body.compute_tier.value,
     )
     if cam is None:
         # Store vanished or got reassigned out of the agent's org.
@@ -217,7 +218,9 @@ async def agent_register_camera(
         detail={"mediamtx_path": cam.mediamtx_path},
     )
     await db.commit()
-    if cam.mediamtx_path and body.rtsp_url:
+    # ADR-0029: only cloud-tier cameras provision the cloud live worker; edge
+    # cameras run Stage-1 on the store device.
+    if cam.topology_mode == "cloud" and cam.mediamtx_path and body.rtsp_url:
         await live_provision.provision(
             cam.mediamtx_path,
             body.rtsp_url,
@@ -252,6 +255,7 @@ async def agent_update_camera(
         name=body.name,
         rtsp_url=body.rtsp_url,
         risk_threshold=body.risk_threshold,
+        compute_tier=body.compute_tier.value if body.compute_tier else None,
     )
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()
@@ -259,7 +263,8 @@ async def agent_update_camera(
     # follows the edit (the node reads the threshold at worker start). On a
     # threshold-only edit body.rtsp_url is None → use the stored encrypted URL.
     threshold_changed = body.risk_threshold is not None
-    if cam.mediamtx_path and (rtsp_changed or threshold_changed):
+    # ADR-0029: never (re)provision a cloud worker for an edge-tier camera.
+    if cam.topology_mode == "cloud" and cam.mediamtx_path and (rtsp_changed or threshold_changed):
         rtsp = body.rtsp_url if rtsp_changed else await camera_repo.decrypt_rtsp_url(cam)
         if rtsp:
             await live_provision.provision(

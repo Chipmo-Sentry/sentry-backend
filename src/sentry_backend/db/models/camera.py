@@ -1,5 +1,6 @@
 """Camera (per-store IP camera)."""
 
+import enum
 from typing import Any
 from uuid import UUID
 
@@ -9,6 +10,24 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from sentry_backend.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class ComputeTier(enum.StrEnum):
+    """Where this camera's Stage-1 (YOLO + behaviour) runs — the billing + topology
+    primitive (ADR-0029). Stored as a plain string column (not a PG enum) so adding
+    a tier later needs no type migration.
+
+    - ``cloud`` — sentry-ai on the GPU node runs Stage-1 + Stage-2 from a pulled RTSP
+      stream. The default; the existing path, unchanged.
+    - ``edge_pc`` — the store PC (sentry-agent-pc) runs Stage-1 locally and uploads
+      only suspicious clips for the cloud VLM verdict.
+    - ``edge_device`` — a future on-prem edge box (Orange Pi 5, sentry-agent-pi5).
+      Reserved; not built yet.
+    """
+
+    cloud = "cloud"
+    edge_pc = "edge_pc"
+    edge_device = "edge_device"
 
 
 class Camera(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -46,3 +65,19 @@ class Camera(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # turns yellow/red on the live view gets checked. Per-camera tunable in the
     # web UI; raise it if a busy camera generates too much VLM load.
     risk_threshold: Mapped[float] = mapped_column(Float, default=11.0, nullable=False)
+
+    # ADR-0029 — per-camera compute tier (billing + Stage-1 location). Additive;
+    # default 'cloud' keeps every existing camera on the unchanged cloud-pull path.
+    compute_tier: Mapped[str] = mapped_column(
+        String(16),
+        default=ComputeTier.cloud.value,
+        server_default=ComputeTier.cloud.value,
+        nullable=False,
+    )
+
+    @property
+    def topology_mode(self) -> str:
+        """Derived routing flag: 'cloud' for the cloud tier, 'edge' otherwise.
+        Edge cameras skip the cloud live worker + MediaMTX pull (Stage-1 runs on
+        the store device); cloud cameras are untouched."""
+        return "cloud" if self.compute_tier == ComputeTier.cloud.value else "edge"

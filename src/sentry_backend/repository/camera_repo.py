@@ -57,6 +57,7 @@ async def create_camera(
     enabled: bool,
     mediamtx_path: str | None = None,
     risk_threshold: float = 11.0,
+    compute_tier: str = "cloud",
 ) -> Camera | None:
     """Return None if the store doesn't belong to the org (404 surfaced by caller).
 
@@ -77,6 +78,7 @@ async def create_camera(
         enabled=enabled,
         mediamtx_path=path,
         risk_threshold=risk_threshold,
+        compute_tier=compute_tier,
     )
     db.add(cam)
     await db.flush()
@@ -116,6 +118,7 @@ async def update_camera(
     enabled: bool | None = None,
     mediamtx_path: str | None = None,
     risk_threshold: float | None = None,
+    compute_tier: str | None = None,
 ) -> Camera:
     if name is not None:
         camera.name = name
@@ -132,6 +135,8 @@ async def update_camera(
         camera.mediamtx_path = await _allocate_mediamtx_path(db, mediamtx_path)
     if risk_threshold is not None:
         camera.risk_threshold = risk_threshold
+    if compute_tier is not None:
+        camera.compute_tier = compute_tier
     await db.flush()
     return camera
 
