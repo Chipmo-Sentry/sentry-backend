@@ -74,6 +74,7 @@ async def create_camera(
             enabled=cam.enabled,
             store_id=str(cam.store_id),
             risk_threshold=cam.risk_threshold,
+            zones=cam.zones,
         )
     return CameraPublic.from_orm_camera(cam)
 
@@ -166,6 +167,7 @@ async def update_camera(
                 enabled=cam.enabled,
                 store_id=str(cam.store_id),
                 risk_threshold=cam.risk_threshold,
+                zones=cam.zones,
             )
     return CameraPublic.from_orm_camera(cam)
 

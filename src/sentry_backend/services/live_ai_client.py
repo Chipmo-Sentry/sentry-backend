@@ -42,12 +42,16 @@ async def start_worker(
     mediamtx_path: str,
     store_id: str | None = None,
     risk_threshold: float | None = None,
+    zones: list[dict[str, object]] | None = None,
 ) -> bool:
     """POST sentry-ai /v1/live/start for this camera. Never raises.
 
     `store_id` enables store-scoped cross-camera re-ID on the node (ADR-0023).
     `risk_threshold` (0-100) is the per-camera breach threshold the node fires at;
     None lets the node fall back to its global default.
+    `zones` (docs/29) are the camera's normalized detection polygons; the node's
+    behavior engine uses them (exit_after_concealment / repeated_shelf_visit).
+    Omitted when None/empty so an un-updated node simply ignores the field.
     """
     settings = get_settings()
     if not settings.sentry_ai_url or not settings.mediamtx_rtsp_url:
@@ -66,6 +70,8 @@ async def start_worker(
     }
     if risk_threshold is not None:
         body["risk_threshold"] = risk_threshold
+    if zones:
+        body["zones"] = zones
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.post(url, json=body, headers=headers)
