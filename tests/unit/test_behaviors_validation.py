@@ -20,12 +20,14 @@ from sentry_backend.repository.camera_repo import _slugify
 
 
 def test_builtin_seed_v2_catalog() -> None:
-    # v2 (ADR-0024): 14 criteria across 4 levels (10 detector-backed + 4 inert).
-    # rfid_mismatch dropped — it needs RFID hardware, out of scope for camera-only.
+    # v2 (ADR-0024): 14 criteria across 4 levels. docs/29 P1c made
+    # exit_after_concealment + repeated_shelf_visit zone-aware detectors → 12
+    # detector-backed + 2 inert multi-person placeholders (group_distraction,
+    # coordinated_activity). rfid_mismatch dropped — needs RFID hardware.
     assert len(BUILTIN_META) == 14
     assert len(BUILTIN_KEYS) == 14
     detectors = [m for m in BUILTIN_META if m["has_detector"]]
-    assert len(detectors) == 10
+    assert len(detectors) == 12
     # Every criterion carries a category + level 1-4.
     for m in BUILTIN_META:
         assert m["category"] in {"suspicious", "concealment", "organized", "critical"}
@@ -41,11 +43,12 @@ def test_seed_dimensions_active_matches_detector() -> None:
 
 
 def test_placeholders_seed_inactive() -> None:
+    # Only the multi-person organized-theft criteria remain inert (no detector
+    # yet); the zone-aware pair went live in docs/29 P1c.
     by_key = {d["key"]: d for d in _seed_dimensions()}
     for key in (
-        "repeated_shelf_visit",
         "group_distraction",
-        "exit_after_concealment",
+        "coordinated_activity",
     ):
         assert by_key[key]["active"] is False
         assert by_key[key]["has_detector"] is False
