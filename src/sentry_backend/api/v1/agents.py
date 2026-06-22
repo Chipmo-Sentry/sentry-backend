@@ -283,8 +283,10 @@ async def agent_update_camera(
     # up the new polygons (exit_after_concealment / repeated_shelf_visit).
     zones_changed = body.zones is not None
     # ADR-0029: never (re)provision a cloud worker for an edge-tier camera.
-    if cam.topology_mode == "cloud" and cam.mediamtx_path and (
-        rtsp_changed or threshold_changed or zones_changed
+    if (
+        cam.topology_mode == "cloud"
+        and cam.mediamtx_path
+        and (rtsp_changed or threshold_changed or zones_changed)
     ):
         rtsp = body.rtsp_url if rtsp_changed else await camera_repo.decrypt_rtsp_url(cam)
         if rtsp:
