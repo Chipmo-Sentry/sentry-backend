@@ -179,15 +179,6 @@ BUILTIN_META: list[dict[str, Any]] = [
         "level": 4,
         "has_detector": False,
     },
-    {
-        "key": "rfid_mismatch",
-        "label_mn": "RFID зөрчил",
-        "description_mn": "Камер нуун далдлалт илрүүлсэн боловч RFID бараа төлбөргүй идэвхтэй хэвээр. ⚠ RFID тоног төхөөрөмж шаардана — идэвхгүй.",
-        "weight": 100.0,
-        "category": CAT_CRITICAL,
-        "level": 4,
-        "has_detector": False,
-    },
 ]
 BUILTIN_KEYS = {d["key"] for d in BUILTIN_META}
 

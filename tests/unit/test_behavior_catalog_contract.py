@@ -44,9 +44,9 @@ SEQUENCE_KEYS: list[str] = [
     "seq_pickup_wrist_bag",
 ]
 
-# Full BUILTIN_META catalog (15 = 9 live detectors + concealment_sequence +
-# 5 inert placeholders awaiting detectors). Backend-only — sentry-ai does not
-# know the inert keys.
+# Full BUILTIN_META catalog (14 = 9 live detectors + concealment_sequence +
+# 4 inert placeholders awaiting detectors). Backend-only — sentry-ai does not
+# know the inert keys. (rfid_mismatch dropped — needs RFID hardware.)
 CATALOG_KEYS: list[str] = [
     "bag_interaction",
     "body_block",
@@ -61,7 +61,6 @@ CATALOG_KEYS: list[str] = [
     "pocket_interaction",
     "rapid_movement",
     "repeated_shelf_visit",
-    "rfid_mismatch",
     "wrist_to_torso",
 ]
 
