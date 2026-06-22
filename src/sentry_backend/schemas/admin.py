@@ -62,6 +62,17 @@ def would_self_lockout(
     return update.is_active is False
 
 
+class StoreAdminRow(BaseModel):
+    """One store with its org name + camera count — drives the superadmin store
+    pickers (e.g. the per-store edge-config editor). Cross-org: super-admin only."""
+
+    id: str
+    name: str
+    organization_id: str
+    organization_name: str
+    camera_count: int = 0
+
+
 class AdminAlertRow(AlertPublic):
     """One alert enriched with org/store/camera display names for the superadmin
     pipeline ("Урсгал") page. Each row is one problematic clip's full journey:
