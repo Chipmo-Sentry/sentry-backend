@@ -210,6 +210,7 @@ async def agent_register_camera(
         mediamtx_path=body.mediamtx_path,
         risk_threshold=body.risk_threshold,
         compute_tier=body.compute_tier.value,
+        zones=[z.model_dump() for z in body.zones] if body.zones is not None else None,
     )
     if cam is None:
         # Store vanished or got reassigned out of the agent's org.
@@ -269,6 +270,7 @@ async def agent_update_camera(
         rtsp_url=body.rtsp_url,
         risk_threshold=body.risk_threshold,
         compute_tier=body.compute_tier.value if body.compute_tier else None,
+        zones=[z.model_dump() for z in body.zones] if body.zones is not None else None,
     )
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()

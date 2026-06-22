@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from sentry_backend.db.models.camera import ComputeTier
-from sentry_backend.schemas.camera import MEDIAMTX_PATH_PATTERN
+from sentry_backend.schemas.camera import MAX_ZONES_PER_CAMERA, MEDIAMTX_PATH_PATTERN, Zone
 
 
 class PairingCodePublic(BaseModel):
@@ -59,6 +59,8 @@ class AgentCameraCreate(BaseModel):
     risk_threshold: float = Field(default=11.0, ge=0.0, le=100.0)
     # ADR-0029 — compute tier; default cloud. An older agent that omits it stays cloud.
     compute_tier: ComputeTier = ComputeTier.cloud
+    # docs/29 — per-camera detection zones (the agent is the author/source of truth).
+    zones: list[Zone] | None = Field(default=None, max_length=MAX_ZONES_PER_CAMERA)
 
 
 class AgentCameraUpdate(BaseModel):
@@ -72,6 +74,8 @@ class AgentCameraUpdate(BaseModel):
     rtsp_url: str | None = Field(default=None, min_length=1)
     risk_threshold: float | None = Field(default=None, ge=0.0, le=100.0)
     compute_tier: ComputeTier | None = None
+    # docs/29 — None = no-op (zones unchanged); [] = clear all zones.
+    zones: list[Zone] | None = Field(default=None, max_length=MAX_ZONES_PER_CAMERA)
 
 
 class AgentStreamConfig(BaseModel):
