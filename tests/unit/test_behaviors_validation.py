@@ -20,9 +20,10 @@ from sentry_backend.repository.camera_repo import _slugify
 
 
 def test_builtin_seed_v2_catalog() -> None:
-    # v2 (ADR-0024): 15 criteria across 4 levels (10 detector-backed + 5 inert).
-    assert len(BUILTIN_META) == 15
-    assert len(BUILTIN_KEYS) == 15
+    # v2 (ADR-0024): 14 criteria across 4 levels (10 detector-backed + 4 inert).
+    # rfid_mismatch dropped — it needs RFID hardware, out of scope for camera-only.
+    assert len(BUILTIN_META) == 14
+    assert len(BUILTIN_KEYS) == 14
     detectors = [m for m in BUILTIN_META if m["has_detector"]]
     assert len(detectors) == 10
     # Every criterion carries a category + level 1-4.
@@ -45,7 +46,6 @@ def test_placeholders_seed_inactive() -> None:
         "repeated_shelf_visit",
         "group_distraction",
         "exit_after_concealment",
-        "rfid_mismatch",
     ):
         assert by_key[key]["active"] is False
         assert by_key[key]["has_detector"] is False
@@ -86,7 +86,7 @@ def test_reconcile_upgrades_pre_v2_row() -> None:
     )
     assert changed
     keys = {d["key"] for d in dims}
-    assert BUILTIN_KEYS.issubset(keys)  # all 15 v2 criteria now present
+    assert BUILTIN_KEYS.issubset(keys)  # all 14 v2 criteria now present
     assert len(dims) == len(BUILTIN_META)
     # thresholds reset to v2 (scale changed) — high_max now present.
     assert thresholds == DEFAULT_THRESHOLDS
