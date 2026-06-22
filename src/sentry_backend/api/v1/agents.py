@@ -5,8 +5,9 @@ Two audiences:
   • Agent (agent JWT):        pair, register cameras, heartbeat.
 """
 
+import json
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -344,6 +345,22 @@ async def agent_edge_config(
     return merged_edge_payload(row.version, row.overrides)
 
 
+def _parse_edge_detail(raw: str | None) -> list[dict[str, Any]] | None:
+    """The edge gate's per-movement score breakdown ([{key, offset_sec, score}])
+    as a JSON string → the alert's triggered_behavior_detail, so the existing
+    breakdown table (frontend + superadmin) shows what the EDGE scored.
+    Best-effort: a malformed payload never blocks the alert."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return [d for d in parsed if isinstance(d, dict)]
+
+
 @router.post("/agent/edge/clips", response_model=AlertPublic, status_code=status.HTTP_201_CREATED)
 @limiter.limit(lambda: get_settings().edge_clip_rate_limit)
 async def agent_edge_clip(
@@ -356,6 +373,7 @@ async def agent_edge_clip(
     behaviors: Annotated[str, Form()] = "",
     started_at: Annotated[float, Form()] = 0.0,
     ended_at: Annotated[float, Form()] = 0.0,
+    edge_behavior_detail: Annotated[str | None, Form()] = None,
 ) -> AlertPublic:
     """Edge Stage-1 (ADR-0029): the store agent ran YOLO + behaviour LOCALLY and
     uploads ONE suspicious clip. We store it, get the VLM verdict from sentry-ai
@@ -393,6 +411,7 @@ async def agent_edge_clip(
     await db.commit()
 
     behaviors_list = [b for b in behaviors.split(",") if b]
+    edge_detail = _parse_edge_detail(edge_behavior_detail)
     verdict = await ai_service.verify_edge_clip(storage_path, store_id=str(agent.store_id))
 
     # Defaults = the VLM-unavailable fallback (behaviour-only, log level).
@@ -435,6 +454,7 @@ async def agent_edge_clip(
         triggered_by=AlertTrigger.edge_pc_upload,
         peak_risk_pct=risk_pct,
         triggered_behaviors=behaviors_list or None,
+        triggered_behavior_detail=edge_detail,
         embedding=embedding,
     )
     alert_public = AlertPublic.model_validate(alert)
