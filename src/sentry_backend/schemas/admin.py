@@ -1,6 +1,7 @@
 """Super-admin dashboard + user management schemas."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_serializer
 
@@ -71,6 +72,10 @@ class AdminAlertRow(AlertPublic):
     organization_name: str
     store_name: str | None = None
     camera_name: str | None = None
+    # The EDGE gate's own per-movement score breakdown for the source clip (null
+    # for cloud live-push / manual uploads) — shown alongside the cloud re-score.
+    edge_behavior_detail: list[dict[str, Any]] | None = None
+    edge_risk_pct: float | None = None
 
     @field_serializer("created_at")
     def _ser_created(self, v: datetime) -> str:

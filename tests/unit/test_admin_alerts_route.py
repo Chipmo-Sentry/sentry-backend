@@ -68,8 +68,10 @@ def test_admin_alerts_returns_enriched_trace(
 ) -> None:
     alert = FakeAlert()
 
-    async def _rows(_db: object, **_kw: object) -> list[tuple[object, str, str, str]]:
-        return [(alert, "Org A", "Store A", "Cam-1")]
+    edge = [{"key": "wrist_to_torso", "offset_sec": 1.2, "score": 3.0}]
+
+    async def _rows(_db: object, **_kw: object) -> list[tuple[object, ...]]:
+        return [(alert, "Org A", "Store A", "Cam-1", edge, 72.0)]
 
     async def _verdicts(_db: object, _ids: object) -> dict[UUID, FeedbackVerdict]:
         return {alert.id: FeedbackVerdict.false_positive}
@@ -89,6 +91,8 @@ def test_admin_alerts_returns_enriched_trace(
     assert row["feedback_verdict"] == "false_positive"
     assert row["triggered_behaviors"] == ["pocket_conceal", "looking_around"]
     assert row["created_at"].startswith("2026-06-20T12:00:00")
+    assert row["edge_behavior_detail"] == edge
+    assert row["edge_risk_pct"] == 72.0
 
 
 def test_admin_alerts_empty(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

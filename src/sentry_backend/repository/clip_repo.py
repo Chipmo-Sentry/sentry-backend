@@ -1,6 +1,7 @@
 """Clip CRUD."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -53,6 +54,8 @@ async def create_clip(
     storage_path: str,
     file_size_bytes: int,
     sha256: str,
+    edge_behavior_detail: list[dict[str, Any]] | None = None,
+    edge_risk_pct: float | None = None,
 ) -> Clip:
     clip = Clip(
         organization_id=organization_id,
@@ -63,6 +66,8 @@ async def create_clip(
         storage_path=storage_path,
         file_size_bytes=file_size_bytes,
         sha256=sha256,
+        edge_behavior_detail=edge_behavior_detail,
+        edge_risk_pct=edge_risk_pct,
     )
     db.add(clip)
     await db.flush()

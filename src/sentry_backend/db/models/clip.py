@@ -1,9 +1,11 @@
 """Clip — video clip uploaded for AI analysis."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,3 +50,8 @@ class Clip(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # which is business history). Also excludes the row from future sweeps.
     # NULL = file still expected on disk.
     file_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Edge gate (sentry-agent-pc) score breakdown for clips it uploaded via
+    # /agent/edge/clips: per-movement events [{key, offset_sec, score}] + the
+    # edge's peak risk. NULL for manual uploads / live-push clips.
+    edge_behavior_detail: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    edge_risk_pct: Mapped[float | None] = mapped_column(Float, nullable=True)

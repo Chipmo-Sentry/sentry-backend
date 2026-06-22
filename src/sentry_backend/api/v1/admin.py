@@ -135,7 +135,7 @@ async def list_alerts_admin(
     alerts = [row[0] for row in rows]
     verdicts = await feedback_repo.latest_verdicts_for_alerts(db, [a.id for a in alerts])
     out: list[AdminAlertRow] = []
-    for alert, org_name, store_name, cam_name in rows:
+    for alert, org_name, store_name, cam_name, edge_detail, edge_risk in rows:
         base = AlertPublic.model_validate(alert)
         base.feedback_verdict = verdicts.get(alert.id)
         out.append(
@@ -144,6 +144,8 @@ async def list_alerts_admin(
                 organization_name=org_name,
                 store_name=store_name,
                 camera_name=cam_name,
+                edge_behavior_detail=edge_detail,
+                edge_risk_pct=edge_risk,
             )
         )
     return out

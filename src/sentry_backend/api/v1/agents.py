@@ -5,10 +5,22 @@ Two audiences:
   • Agent (agent JWT):        pair, register cameras, heartbeat.
 """
 
-from typing import Annotated
+import asyncio
+import json
+from datetime import UTC, datetime
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +33,7 @@ from sentry_backend.deps.agent_auth import get_current_agent
 from sentry_backend.deps.auth import get_current_user
 from sentry_backend.deps.db import get_db
 from sentry_backend.ratelimit import limiter
-from sentry_backend.repository import agent_repo, camera_repo
+from sentry_backend.repository import agent_repo, camera_repo, clip_repo
 from sentry_backend.schemas.agent import (
     AgentCameraCreate,
     AgentCameraUpdate,
@@ -32,8 +44,14 @@ from sentry_backend.schemas.agent import (
     PairingCodePublic,
 )
 from sentry_backend.schemas.camera import CameraPublic
+from sentry_backend.schemas.clip import ClipPublic
 from sentry_backend.security import create_agent_token
 from sentry_backend.services import event_log, live_provision
+from sentry_backend.services.ai_service import verify_clip_with_ai
+from sentry_backend.services.clip_service import (
+    ClipTooLargeError,
+    save_upload_to_disk,
+)
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
@@ -324,3 +342,80 @@ async def agent_heartbeat(
         actor_label=agent.name or "agent",
         is_heartbeat=True,
     )
+
+
+def _parse_edge_detail(raw: str | None) -> list[dict[str, Any]] | None:
+    """The edge's per-movement breakdown ([{key, offset_sec, score}]) as JSON.
+    Best-effort — a malformed payload never blocks the clip."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return [d for d in parsed if isinstance(d, dict)]
+
+
+@router.post(
+    "/agent/edge/clips",
+    response_model=ClipPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+async def agent_upload_edge_clip(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
+    clip: Annotated[UploadFile, File()],
+    camera_uuid: Annotated[UUID, Form()],
+    risk_pct: Annotated[float, Form()] = 0.0,
+    started_at: Annotated[float | None, Form()] = None,
+    ended_at: Annotated[float | None, Form()] = None,
+    edge_behavior_detail: Annotated[str | None, Form()] = None,
+) -> ClipPublic:
+    """Edge gate (sentry-agent-pc) uploads a clip it scored worth a look. Stored
+    with the edge's own per-movement score breakdown + peak risk, then handed to
+    the cloud VLM re-score + alert exactly like a manual upload. The superadmin
+    pipeline shows the edge breakdown alongside the cloud's via the alert's clip."""
+    cam = await camera_repo.get_camera_for_org(db, camera_uuid, agent.organization_id)
+    if cam is None or cam.store_id != agent.store_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Камер олдсонгүй эсвэл энэ агентад хамаарахгүй байна.",
+        )
+
+    try:
+        storage_path, size_bytes, sha256 = await save_upload_to_disk(
+            clip, organization_id=agent.organization_id
+        )
+    except ClipTooLargeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Клипийн хэмжээ хэтэрсэн байна.",
+        ) from e
+
+    existing = await clip_repo.find_clip_by_sha256_for_org(db, sha256, agent.organization_id)
+    if existing is not None:
+        storage_path.unlink(missing_ok=True)
+        return ClipPublic.model_validate(existing)
+
+    captured = datetime.fromtimestamp(started_at, tz=UTC) if started_at else datetime.now(UTC)
+    duration = max(0.0, ended_at - started_at) if started_at and ended_at else 0.0
+
+    new_clip = await clip_repo.create_clip(
+        db,
+        organization_id=agent.organization_id,
+        store_id=agent.store_id,
+        camera_id=cam.id,
+        captured_at=captured,
+        duration_sec=duration,
+        storage_path=str(storage_path),
+        file_size_bytes=size_bytes,
+        sha256=sha256,
+        edge_behavior_detail=_parse_edge_detail(edge_behavior_detail),
+        edge_risk_pct=risk_pct,
+    )
+
+    # Fire-and-forget: the cloud re-scores + VLM-judges and emits the Alert.
+    asyncio.create_task(verify_clip_with_ai(new_clip.id))  # noqa: RUF006
+    return ClipPublic.model_validate(new_clip)
