@@ -71,11 +71,11 @@ BUILTIN_META: list[dict[str, Any]] = [
     {
         "key": "repeated_shelf_visit",
         "label_mn": "Тавиур давтан зочлох",
-        "description_mn": "Нэг тавиур/бараанд олон удаа эргэж ирэх. ⚠ Бүс (shelf zone) шаардана — одоогоор идэвхгүй.",
+        "description_mn": "Нэг тавиурын бүсэд олон удаа эргэж ирэх (default 3 удаа). Shelf зон шаардана.",
         "weight": 3.0,
         "category": CAT_SUSPICIOUS,
         "level": 1,
-        "has_detector": False,
+        "has_detector": True,
     },
     {
         "key": "rapid_movement",
@@ -173,11 +173,11 @@ BUILTIN_META: list[dict[str, Any]] = [
     {
         "key": "exit_after_concealment",
         "label_mn": "Нуусны дараа гарц руу",
-        "description_mn": "Нуун далдлалтын дараа дэлгүүрийн гарц руу хөдлөх. ⚠ Гарцын бүс шаардана — идэвхгүй.",
+        "description_mn": "Нуун далдалсны дараа exit зон руу орох — хамгийн өндөр магадлалтай дохио, шууд ALERT. Exit зон шаардана.",
         "weight": 50.0,
         "category": CAT_CRITICAL,
         "level": 4,
-        "has_detector": False,
+        "has_detector": True,
     },
 ]
 BUILTIN_KEYS = {d["key"] for d in BUILTIN_META}

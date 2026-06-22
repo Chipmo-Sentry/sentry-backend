@@ -25,11 +25,13 @@ AI_DIMENSION_KEYS: list[str] = [
     "bag_interaction",
     "body_block",
     "crouch",
+    "exit_after_concealment",
     "item_pickup",
     "loitering",
     "looking_around",
     "pocket_interaction",
     "rapid_movement",
+    "repeated_shelf_visit",
     "wrist_to_torso",
 ]
 
@@ -44,9 +46,10 @@ SEQUENCE_KEYS: list[str] = [
     "seq_pickup_wrist_bag",
 ]
 
-# Full BUILTIN_META catalog (14 = 9 live detectors + concealment_sequence +
-# 4 inert placeholders awaiting detectors). Backend-only — sentry-ai does not
-# know the inert keys. (rfid_mismatch dropped — needs RFID hardware.)
+# Full BUILTIN_META catalog (14 = 11 live detectors + concealment_sequence +
+# 2 inert placeholders awaiting multi-person detectors: group_distraction,
+# coordinated_activity). docs/29 P1c made exit_after_concealment +
+# repeated_shelf_visit live (zone-aware). (rfid_mismatch dropped — needs RFID.)
 CATALOG_KEYS: list[str] = [
     "bag_interaction",
     "body_block",
@@ -81,7 +84,7 @@ def test_sequence_meta_keys_match_contract() -> None:
 
 
 def test_detector_backed_keys_match_sentry_ai() -> None:
-    # has_detector=True ⇔ sentry-ai scores it live: the 9 weighted dimensions
+    # has_detector=True ⇔ sentry-ai scores it live: the 11 weighted dimensions
     # plus the concealment_sequence critical sequence rule.
     live = sorted(m["key"] for m in BUILTIN_META if m["has_detector"])
     assert live == sorted([*AI_DIMENSION_KEYS, "concealment_sequence"]), _SYNC_MSG
