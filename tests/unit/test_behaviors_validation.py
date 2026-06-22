@@ -97,6 +97,32 @@ def test_reconcile_upgrades_pre_v2_row() -> None:
     assert next(d for d in dims if d["key"] == "item_pickup")["active"] is False
 
 
+def test_reconcile_drops_retired_builtin() -> None:
+    # An already-v2 store row that still carries a RETIRED built-in (rfid_mismatch,
+    # now removed from meta) must have it pruned — otherwise it lingers in every
+    # already-seeded store and still shows on the superadmin Behaviors page.
+    dims = _seed_dimensions()  # current v2 catalog (14 built-ins)
+    dims.append(
+        {
+            "key": "rfid_mismatch",
+            "label_mn": "x",
+            "description_mn": "",
+            "weight": 100.0,
+            "active": False,
+            "builtin": True,
+            "has_detector": False,
+            "category": "critical",
+            "level": 4,
+            "params": {},
+        }
+    )
+    out, _t, _e, changed = _reconcile_v2(dims, dict(DEFAULT_THRESHOLDS), {})
+    keys = {d["key"] for d in out}
+    assert "rfid_mismatch" not in keys
+    assert keys == BUILTIN_KEYS  # exactly the current catalog, nothing extra
+    assert changed is True
+
+
 def test_reconcile_preserves_custom_criteria() -> None:
     v1_dims = [
         {

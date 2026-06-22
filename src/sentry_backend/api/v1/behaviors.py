@@ -422,6 +422,13 @@ def _reconcile_v2(
 
     if is_v2:
         changed = False
+        # Drop stored built-ins whose key was retired from meta (e.g. rfid_mismatch
+        # removed) — the additive reconcile below never prunes, so a retired key
+        # would otherwise linger in every already-seeded store's row forever.
+        kept = [d for d in dims if not (d.get("builtin") and d["key"] not in BUILTIN_KEYS)]
+        if len(kept) != len(dims):
+            dims = kept
+            changed = True
         for m in BUILTIN_META:
             if m["key"] not in by_key:
                 dims.append(_seed_one(m))
