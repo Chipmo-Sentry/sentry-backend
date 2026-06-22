@@ -25,12 +25,14 @@ from sentry_backend.repository import (
     feedback_repo,
     lead_repo,
     org_repo,
+    store_repo,
     user_repo,
 )
 from sentry_backend.schemas.admin import (
     AdminAlertRow,
     AdminStats,
     OrgMemberPublic,
+    StoreAdminRow,
     UserAdminUpdate,
     would_self_lockout,
 )
@@ -521,6 +523,26 @@ async def update_ai_node(
 
 
 # ── Per-store edge config (ADR-0029 I3 / I9) ────────────────────────────────
+
+
+@router.get("/stores", response_model=list[StoreAdminRow])
+async def list_stores_admin(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> list[StoreAdminRow]:
+    """Every store across ALL orgs with its org name + camera count — drives the
+    superadmin store pickers (e.g. the per-store edge-config editor)."""
+    rows = await store_repo.list_all_with_org_and_camera_count(db)
+    return [
+        StoreAdminRow(
+            id=str(store.id),
+            name=store.name,
+            organization_id=str(store.organization_id),
+            organization_name=org_name,
+            camera_count=cam_n,
+        )
+        for store, org_name, cam_n in rows
+    ]
 
 
 async def _require_store(db: AsyncSession, store_id: UUID) -> Store:

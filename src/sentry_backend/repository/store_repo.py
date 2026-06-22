@@ -2,10 +2,32 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.camera import Camera
+from sentry_backend.db.models.organization import Organization
 from sentry_backend.db.models.store import Store
+
+
+async def list_all_with_org_and_camera_count(
+    db: AsyncSession,
+) -> list[tuple[Store, str, int]]:
+    """Every store across ALL orgs with (store, organization_name, camera_count),
+    ordered by org then store name. Super-admin store pickers (e.g. the per-store
+    edge-config editor) use this. Cross-org — gate at the route."""
+    cam_counts = (
+        select(Camera.store_id, func.count(Camera.id).label("n"))
+        .group_by(Camera.store_id)
+        .subquery()
+    )
+    result = await db.execute(
+        select(Store, Organization.name, func.coalesce(cam_counts.c.n, 0))
+        .join(Organization, Organization.id == Store.organization_id)
+        .outerjoin(cam_counts, cam_counts.c.store_id == Store.id)
+        .order_by(Organization.name, Store.name)
+    )
+    return [(store, org_name, int(cam_n)) for store, org_name, cam_n in result.all()]
 
 
 async def list_stores_for_org(db: AsyncSession, org_id: UUID) -> list[Store]:
