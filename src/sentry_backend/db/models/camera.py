@@ -74,6 +74,12 @@ class Camera(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default=ComputeTier.cloud.value,
         nullable=False,
     )
+    # docs/29 — per-camera detection zones: a list of normalized polygons
+    # [{"id","type","points":[[x,y],...]}], 0-1 image-space coords. Authored on
+    # the agent-pc, synced via camera-CRUD, consumed by the behavior engine
+    # (exit_after_concealment / repeated_shelf_visit) + drawn read-only on /live.
+    # Additive; null = no zones. Distinct shape from shelf_zone_json (single bbox).
+    zones: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
     @property
     def topology_mode(self) -> str:

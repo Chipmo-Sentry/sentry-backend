@@ -1,10 +1,10 @@
 """Camera CRUD schemas."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from sentry_backend.db.models.camera import Camera, ComputeTier
 
@@ -13,6 +13,41 @@ from sentry_backend.db.models.camera import Camera, ComputeTier
 # alphanumerics, underscore and hyphen only, no '/', '..', whitespace, etc.
 # Shared by CameraCreate/CameraUpdate and the agent-facing AgentCameraCreate.
 MEDIAMTX_PATH_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
+
+# Upper bounds on the per-camera `zones` payload (defense-in-depth). The agent is
+# only a semi-trusted client — its JWT derives from a 6-digit store-pairing code —
+# so a buggy/malicious agent could otherwise POST one polygon of millions of
+# in-range points, or thousands of zones, bloating the JSONB column and amplifying
+# memory on EVERY camera-list read (from_orm re-validates each zone). These caps
+# are generous for any real floor plan (a store has a handful of zones, a hand-drawn
+# polygon a few dozen vertices) while keeping the field bounded like every other
+# client-supplied field (mediamtx_path regex, name=255, rtsp_url=2048).
+MAX_ZONES_PER_CAMERA = 64
+MAX_ZONE_POINTS = 512
+
+
+class Zone(BaseModel):
+    """A per-camera detection zone (docs/29) — a polygon in NORMALIZED image space
+    (every coord in 0-1), drawn on the agent-pc and consumed by the behavior
+    engine (exit_after_concealment / repeated_shelf_visit). Normalized so one
+    definition works across the agent's draw resolution and the cloud worker's
+    stream size. Distinct from the deprecated single-bbox `shelf_zone_json`."""
+
+    id: str | None = None
+    type: Literal["exit", "shelf", "checkout", "entrance"]
+    points: list[tuple[float, float]]
+
+    @field_validator("points")
+    @classmethod
+    def _valid_polygon(cls, v: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(v) < 3:
+            raise ValueError("Зон нь дор хаяж 3 цэгтэй байх ёстой.")
+        if len(v) > MAX_ZONE_POINTS:
+            raise ValueError(f"Зон хэт олон цэгтэй байна (дээд тал {MAX_ZONE_POINTS}).")
+        for x, y in v:
+            if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+                raise ValueError("Зоны цэг 0-1 хооронд нормчилогдсон байх ёстой.")
+        return v
 
 
 class CameraCreate(BaseModel):
@@ -32,6 +67,8 @@ class CameraCreate(BaseModel):
     # ADR-0029 — compute tier (cloud | edge_pc | edge_device); default cloud keeps
     # the existing cloud-pull path. Edge tiers skip the cloud live worker.
     compute_tier: ComputeTier = ComputeTier.cloud
+    # docs/29 — per-camera detection zones (normalized polygons).
+    zones: list[Zone] | None = Field(default=None, max_length=MAX_ZONES_PER_CAMERA)
 
 
 class CameraUpdate(BaseModel):
@@ -43,6 +80,8 @@ class CameraUpdate(BaseModel):
     mediamtx_path: str | None = Field(default=None, pattern=MEDIAMTX_PATH_PATTERN)
     risk_threshold: float | None = Field(default=None, ge=0.0, le=100.0)
     compute_tier: ComputeTier | None = None
+    # docs/29 — None = no-op (leave zones unchanged); [] = clear all zones.
+    zones: list[Zone] | None = Field(default=None, max_length=MAX_ZONES_PER_CAMERA)
 
 
 class StreamTokenResponse(BaseModel):
@@ -69,6 +108,8 @@ class CameraPublic(BaseModel):
     # ADR-0029 — compute tier + the derived routing flag (cloud | edge).
     compute_tier: ComputeTier = ComputeTier.cloud
     topology_mode: str = "cloud"
+    # docs/29 — per-camera detection zones (normalized polygons), or None.
+    zones: list[Zone] | None = None
 
     @classmethod
     def from_orm_camera(cls, camera: Camera) -> "CameraPublic":
@@ -85,4 +126,5 @@ class CameraPublic(BaseModel):
             risk_threshold=camera.risk_threshold,
             compute_tier=ComputeTier(camera.compute_tier),
             topology_mode=camera.topology_mode,
+            zones=[Zone.model_validate(z) for z in camera.zones] if camera.zones else None,
         )

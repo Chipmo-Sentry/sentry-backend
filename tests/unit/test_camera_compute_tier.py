@@ -72,3 +72,40 @@ def test_camera_public_exposes_tier_and_topology() -> None:
     pub = CameraPublic.from_orm_camera(cam)
     assert pub.compute_tier == ComputeTier.edge_pc
     assert pub.topology_mode == "edge"
+
+
+def _make_camera(**overrides: object) -> Camera:
+    base: dict[str, object] = {
+        "id": uuid4(),
+        "store_id": uuid4(),
+        "name": "Front",
+        "rtsp_url_encrypted": None,
+        "shelf_zone_json": None,
+        "stage2_threshold": 0.5,
+        "enabled": True,
+        "mediamtx_path": "cam1",
+        "risk_threshold": 11.0,
+        "compute_tier": "cloud",
+    }
+    base.update(overrides)
+    cam = Camera(**base)
+    cam.created_at = datetime.now(UTC)
+    return cam
+
+
+def test_camera_public_round_trips_zones() -> None:
+    """from_orm_camera (the single ORM→DTO choke-point) maps stored JSONB zone
+    dicts back into typed Zone models (docs/29)."""
+    cam = _make_camera(
+        zones=[{"id": "z1", "type": "exit", "points": [[0.1, 0.1], [0.9, 0.1], [0.5, 0.9]]}]
+    )
+    pub = CameraPublic.from_orm_camera(cam)
+    assert pub.zones is not None
+    assert pub.zones[0].type == "exit"
+    assert pub.zones[0].id == "z1"
+    assert pub.zones[0].points == [(0.1, 0.1), (0.9, 0.1), (0.5, 0.9)]
+
+
+def test_camera_public_zones_none_when_unset() -> None:
+    pub = CameraPublic.from_orm_camera(_make_camera(zones=None))
+    assert pub.zones is None
