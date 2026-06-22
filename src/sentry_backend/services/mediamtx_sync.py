@@ -49,19 +49,26 @@ async def rehydrate_paths() -> int:
             .scalars()
             .all()
         )
-        # Decrypt inside the session scope (camera objects still attached)
-        to_sync: list[tuple[str, str, str, float]] = []
+        # Decrypt inside the session scope (camera objects still attached). zones
+        # ride along so a backend restart rehydrates the worker WITH its detection
+        # polygons — provision + rehydrate must both carry zones or a restart drops
+        # them from the running worker (docs/29 risk #7).
+        to_sync: list[tuple[str, str, str, float, list[dict[str, object]] | None]] = []
         for cam in cams:
             rtsp = await camera_repo.decrypt_rtsp_url(cam)
             if cam.mediamtx_path and rtsp:
-                to_sync.append((cam.mediamtx_path, rtsp, str(cam.store_id), cam.risk_threshold))
+                to_sync.append(
+                    (cam.mediamtx_path, rtsp, str(cam.store_id), cam.risk_threshold, cam.zones)
+                )
 
     added = 0
-    for path, rtsp, store_id, risk_threshold in to_sync:
+    for path, rtsp, store_id, risk_threshold, zones in to_sync:
         if await mediamtx_client.add_path(path, rtsp):
             added += 1
         # Also restart the AI live worker for this camera (best-effort) so the
         # detection overlay recovers, not just the video stream.
-        await live_ai_client.start_worker(path, store_id=store_id, risk_threshold=risk_threshold)
+        await live_ai_client.start_worker(
+            path, store_id=store_id, risk_threshold=risk_threshold, zones=zones
+        )
     log.info("mediamtx_sync.rehydrated", total=len(to_sync), added=added)
     return added

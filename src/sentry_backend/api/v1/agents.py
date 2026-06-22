@@ -241,6 +241,7 @@ async def agent_register_camera(
             enabled=cam.enabled,
             store_id=str(cam.store_id),
             risk_threshold=cam.risk_threshold,
+            zones=cam.zones,
         )
     return CameraPublic.from_orm_camera(cam)
 
@@ -274,12 +275,17 @@ async def agent_update_camera(
     )
     await agent_repo.touch_last_seen(db, agent)
     await db.commit()
-    # Re-provision when the source OR the risk threshold changed, so the AI
-    # follows the edit (the node reads the threshold at worker start). On a
-    # threshold-only edit body.rtsp_url is None → use the stored encrypted URL.
+    # Re-provision when the source, the risk threshold, OR the zones changed, so
+    # the AI follows the edit (the node reads all three at worker start). On a
+    # threshold/zones-only edit body.rtsp_url is None → use the stored encrypted URL.
     threshold_changed = body.risk_threshold is not None
+    # docs/29 P1c: a zone edit must restart the worker so the behavior engine picks
+    # up the new polygons (exit_after_concealment / repeated_shelf_visit).
+    zones_changed = body.zones is not None
     # ADR-0029: never (re)provision a cloud worker for an edge-tier camera.
-    if cam.topology_mode == "cloud" and cam.mediamtx_path and (rtsp_changed or threshold_changed):
+    if cam.topology_mode == "cloud" and cam.mediamtx_path and (
+        rtsp_changed or threshold_changed or zones_changed
+    ):
         rtsp = body.rtsp_url if rtsp_changed else await camera_repo.decrypt_rtsp_url(cam)
         if rtsp:
             await live_provision.provision(
@@ -288,6 +294,7 @@ async def agent_update_camera(
                 enabled=cam.enabled,
                 store_id=str(cam.store_id),
                 risk_threshold=cam.risk_threshold,
+                zones=cam.zones,
             )
     return CameraPublic.from_orm_camera(cam)
 
