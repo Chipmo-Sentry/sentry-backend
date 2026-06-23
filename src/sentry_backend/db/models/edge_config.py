@@ -20,6 +20,11 @@ from sentry_backend.db.base import Base, TimestampMixin
 
 
 class StoreEdgeConfig(TimestampMixin, Base):
+    # DEPRECATED (2026-06-23): the edge config is now ONE GLOBAL config stored in
+    # app_config key='edge_config' (see edge_config_repo) — per the founder's
+    # decision to tune all stores with a single value. This table is no longer
+    # read or written; it's kept (not dropped) to avoid an Alembic migration in a
+    # repo with hand-assigned, collision-prone revision ids. Safe to drop later.
     __tablename__ = "store_edge_config"
 
     store_id: Mapped[UUID] = mapped_column(

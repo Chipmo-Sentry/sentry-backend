@@ -545,53 +545,42 @@ async def list_stores_admin(
     ]
 
 
-async def _require_store(db: AsyncSession, store_id: UUID) -> Store:
-    store = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
-    if store is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
-    return store
-
-
-@router.get("/stores/{store_id}/edge-config", response_model=EdgeConfigAdminView)
-async def get_store_edge_config(
-    store_id: UUID,
+@router.get("/edge-config", response_model=EdgeConfigAdminView)
+async def get_global_edge_config(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(require_super_admin)],
 ) -> EdgeConfigAdminView:
-    """The store's edge tunable overrides + version + the effective merged config
-    the agent would receive."""
-    await _require_store(db, store_id)
-    row = await edge_config_repo.get_for_store(db, store_id)
-    version = row.version if row else 1
-    overrides = row.overrides if row else {}
+    """The ONE global edge tunable overrides + version + the effective merged
+    config every store's agents receive (ADR-0029 I3; global per founder request)."""
+    row = await edge_config_repo.get_global_row(db)
+    version, overrides = edge_config_repo.parse_row(row)
     return EdgeConfigAdminView(
-        store_id=str(store_id),
+        store_id="global",
         version=version,
         overrides=overrides,
-        updated_at=row.updated_at if row else None,
+        updated_at=row.updated_at_db if row else None,
         effective=merged_edge_payload(version, overrides),
     )
 
 
-@router.put("/stores/{store_id}/edge-config", response_model=EdgeConfigAdminView)
-async def set_store_edge_config(
-    store_id: UUID,
+@router.put("/edge-config", response_model=EdgeConfigAdminView)
+async def set_global_edge_config(
     body: EdgeConfigOverridesIn,
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(require_super_admin)],
 ) -> EdgeConfigAdminView:
-    """Set the store's edge tunable overrides (partial); bumps `version` so the
+    """Set the global edge tunable overrides (partial); bumps `version` so ALL
     store agents re-apply. An empty body resets to the agent defaults (the version
-    still bumps, so the agent picks up the reset)."""
-    await _require_store(db, store_id)
+    still bumps, so the agents pick up the reset)."""
     overrides = body.model_dump(exclude_none=True)
-    row = await edge_config_repo.set_overrides(db, store_id, overrides)
+    row = await edge_config_repo.set_global(db, overrides)
     await db.commit()
     await db.refresh(row)  # load server-side updated_at
+    version, ov = edge_config_repo.parse_row(row)
     return EdgeConfigAdminView(
-        store_id=str(store_id),
-        version=row.version,
-        overrides=row.overrides,
-        updated_at=row.updated_at,
-        effective=merged_edge_payload(row.version, row.overrides),
+        store_id="global",
+        version=version,
+        overrides=ov,
+        updated_at=row.updated_at_db,
+        effective=merged_edge_payload(version, ov),
     )

@@ -342,19 +342,18 @@ async def agent_stream_config(
 @router.get("/agent/edge-config", response_model=EdgeConfigPayload)
 async def agent_edge_config(
     db: Annotated[AsyncSession, Depends(get_db)],
-    agent: Annotated[Agent, Depends(get_current_agent)],
+    _agent: Annotated[Agent, Depends(get_current_agent)],
 ) -> EdgeConfigPayload:
     """Edge Stage-1 tunables for the store agent's config-poller (ADR-0029 I3).
 
-    Returns the store's overrides merged over the defaults, with a monotonic
-    `version` the agent uses to re-apply only on a real change. A store with no
-    override row serves the defaults at version 1. The agent's `from_dict` keeps
-    its own defaults for any omitted field, so this stays forward-compatible.
-    """
-    row = await edge_config_repo.get_for_store(db, agent.store_id)
-    if row is None:
-        return EdgeConfigPayload()
-    return merged_edge_payload(row.version, row.overrides)
+    Returns the ONE GLOBAL overrides merged over the defaults (the config is
+    platform-wide now, not per store), with a monotonic `version` the agent uses
+    to re-apply only on a real change. No config set → defaults at version 1. The
+    agent's `from_dict` keeps its own defaults for any omitted field, so this stays
+    forward-compatible. The agent token is still required (authenticated poll)."""
+    row = await edge_config_repo.get_global_row(db)
+    version, overrides = edge_config_repo.parse_row(row)
+    return merged_edge_payload(version, overrides)
 
 
 # ── Agent: floor plan (docs/30) ─────────────────────────────────────────
