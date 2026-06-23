@@ -1,8 +1,10 @@
 """Store (physical retail location)."""
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,3 +26,8 @@ class Store(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # BE1: per-store Telegram chat to ping on actionable alerts. None → fall
     # back to the global TELEGRAM_ALERT_CHAT_ID (or no notification).
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # docs/30 — top-down floor plan authored in the agent-pc «Plan зураг» page:
+    # {size, walls, fixtures[type], cameras[pos, dir_deg, homography, calib_points]}.
+    # The plan is the SOURCE; per-camera Camera.zones are DERIVED from it (plan
+    # fixture → camera homography → normalized polygon). Additive; null = none yet.
+    floor_plan: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
