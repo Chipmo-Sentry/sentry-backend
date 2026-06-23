@@ -32,6 +32,18 @@ class EdgeConfigPayload(BaseModel):
     w_exit_after_conceal: float = 40.0
     w_repeated_shelf: float = 3.0
     repeated_shelf_threshold: int = 3
+    # Per-behaviour timing gates (must match EdgeConfig): bank a behaviour only
+    # after it's active >= mindur sec, then once per interval sec. 0 = every frame.
+    interval_holding: float = 0.0
+    mindur_holding: float = 0.0
+    interval_wrist_torso: float = 0.0
+    mindur_wrist_torso: float = 0.0
+    interval_conceal: float = 0.0
+    mindur_conceal: float = 0.0
+    interval_repeated_shelf: float = 0.0
+    mindur_repeated_shelf: float = 0.0
+    interval_exit_after_conceal: float = 0.0
+    mindur_exit_after_conceal: float = 0.0
     reach_frac: float = 0.35
     near_frac: float = 0.18
     min_kp_conf: float = 0.30
@@ -76,6 +88,16 @@ class EdgeConfigOverridesIn(BaseModel):
     w_exit_after_conceal: float | None = None
     w_repeated_shelf: float | None = None
     repeated_shelf_threshold: int | None = None
+    interval_holding: float | None = None
+    mindur_holding: float | None = None
+    interval_wrist_torso: float | None = None
+    mindur_wrist_torso: float | None = None
+    interval_conceal: float | None = None
+    mindur_conceal: float | None = None
+    interval_repeated_shelf: float | None = None
+    mindur_repeated_shelf: float | None = None
+    interval_exit_after_conceal: float | None = None
+    mindur_exit_after_conceal: float | None = None
     reach_frac: float | None = None
     near_frac: float | None = None
     min_kp_conf: float | None = None

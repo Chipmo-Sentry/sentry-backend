@@ -23,6 +23,16 @@ _AGENT_FIELDS = {
     "w_exit_after_conceal",  # docs/29 zone behaviours
     "w_repeated_shelf",
     "repeated_shelf_threshold",
+    "interval_holding",  # per-behaviour timing gates
+    "mindur_holding",
+    "interval_wrist_torso",
+    "mindur_wrist_torso",
+    "interval_conceal",
+    "mindur_conceal",
+    "interval_repeated_shelf",
+    "mindur_repeated_shelf",
+    "interval_exit_after_conceal",
+    "mindur_exit_after_conceal",
     "reach_frac",
     "near_frac",
     "min_kp_conf",
