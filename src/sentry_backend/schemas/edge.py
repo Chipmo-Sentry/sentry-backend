@@ -28,6 +28,10 @@ class EdgeConfigPayload(BaseModel):
     w_holding: float = 5.0
     w_conceal: float = 14.0
     w_wrist_torso: float = 3.0
+    # docs/29 zone behaviours (must match sentry_agent_pc.edge.config.EdgeConfig)
+    w_exit_after_conceal: float = 40.0
+    w_repeated_shelf: float = 3.0
+    repeated_shelf_threshold: int = 3
     reach_frac: float = 0.35
     near_frac: float = 0.18
     min_kp_conf: float = 0.30
@@ -69,6 +73,9 @@ class EdgeConfigOverridesIn(BaseModel):
     w_holding: float | None = None
     w_conceal: float | None = None
     w_wrist_torso: float | None = None
+    w_exit_after_conceal: float | None = None
+    w_repeated_shelf: float | None = None
+    repeated_shelf_threshold: int | None = None
     reach_frac: float | None = None
     near_frac: float | None = None
     min_kp_conf: float | None = None
