@@ -12,7 +12,7 @@ from sentry_backend.schemas.edge import (
     merged_edge_payload,
 )
 
-# The 24 tunables the agent's EdgeConfig defines (besides `version`).
+# The tunables the agent's EdgeConfig defines (besides `version`).
 _AGENT_FIELDS = {
     "person_conf",
     "item_conf",
@@ -20,6 +20,9 @@ _AGENT_FIELDS = {
     "w_holding",
     "w_conceal",
     "w_wrist_torso",
+    "w_exit_after_conceal",  # docs/29 zone behaviours
+    "w_repeated_shelf",
+    "repeated_shelf_threshold",
     "reach_frac",
     "near_frac",
     "min_kp_conf",
@@ -41,7 +44,7 @@ _AGENT_FIELDS = {
 }
 
 
-def test_payload_carries_all_24_fields_plus_version() -> None:
+def test_payload_carries_all_fields_plus_version() -> None:
     dumped = EdgeConfigPayload().model_dump()
     assert "version" in dumped
     assert set(dumped) >= _AGENT_FIELDS, _AGENT_FIELDS - set(dumped)

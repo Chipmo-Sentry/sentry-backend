@@ -55,9 +55,7 @@ async def test_set_global_new_row_starts_at_version_2() -> None:
 
 
 async def test_set_global_existing_bumps_version() -> None:
-    existing = AppConfig(
-        key="edge_config", value={"version": 5, "overrides": {"frame_skip": 4}}
-    )
+    existing = AppConfig(key="edge_config", value={"version": 5, "overrides": {"frame_skip": 4}})
     sess = _FakeSession(existing=existing)
     row = await edge_config_repo.set_global(sess, {"band_red": 80.0})  # type: ignore[arg-type]
     assert row is existing  # updated in place, not re-inserted
