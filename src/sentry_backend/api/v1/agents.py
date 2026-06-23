@@ -43,6 +43,7 @@ from sentry_backend.schemas.agent import (
 from sentry_backend.schemas.alert import AlertPublic
 from sentry_backend.schemas.camera import CameraPublic
 from sentry_backend.schemas.edge import EdgeConfigPayload, merged_edge_payload
+from sentry_backend.schemas.floor_plan import FloorPlan
 from sentry_backend.security import create_agent_token
 from sentry_backend.services import ai_service, alert_notify, event_log, live_provision
 from sentry_backend.services.alert_broker import get_broker
@@ -354,6 +355,36 @@ async def agent_edge_config(
     if row is None:
         return EdgeConfigPayload()
     return merged_edge_payload(row.version, row.overrides)
+
+
+# ── Agent: floor plan (docs/30) ─────────────────────────────────────────
+@router.get("/agent/floor-plan", response_model=FloorPlan)
+async def agent_get_floor_plan(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
+) -> FloorPlan:
+    """The store's top-down floor plan (docs/30), or an empty plan if none drawn."""
+    store = await db.get(Store, agent.store_id)
+    if store is None or store.floor_plan is None:
+        return FloorPlan()
+    return FloorPlan.model_validate(store.floor_plan)
+
+
+@router.patch("/agent/floor-plan", response_model=FloorPlan)
+async def agent_update_floor_plan(
+    body: FloorPlan,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
+) -> FloorPlan:
+    """Replace the store's floor plan (full-document write). The agent derives each
+    camera's Camera.zones from this + that camera's homography and PATCHes them
+    separately, so the behavior-engine pipeline is untouched (docs/30)."""
+    store = await db.get(Store, agent.store_id)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+    store.floor_plan = body.model_dump(mode="json")
+    await db.commit()
+    return body
 
 
 def _parse_edge_detail(raw: str | None) -> list[dict[str, Any]] | None:
