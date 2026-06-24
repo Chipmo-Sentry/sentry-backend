@@ -213,6 +213,151 @@ async def feedback_analytics(
     }
 
 
+# Confidence calibration buckets: (low, high, label). The high edge of the last
+# bucket is > 1.0 so a perfect 1.0 confidence still lands somewhere.
+_CONF_BUCKETS: tuple[tuple[float, float, str], ...] = (
+    (0.0, 0.30, "0.00–0.30"),
+    (0.30, 0.50, "0.30–0.50"),
+    (0.50, 0.70, "0.50–0.70"),
+    (0.70, 0.85, "0.70–0.85"),
+    (0.85, 1.0001, "0.85–1.00"),
+)
+# Alert levels actually shown to staff — false ones here drive alert fatigue.
+_STAFF_LEVELS = {"notify", "review"}
+
+
+def _precision(tp: int, fp: int) -> float | None:
+    """TP / (TP + FP), or None when there's nothing labelled to divide by."""
+    return round(tp / (tp + fp), 3) if (tp + fp) else None
+
+
+def compute_quality_metrics(
+    range_: str,
+    total_alerts: int,
+    feedback_rows: list[tuple[Any, str, float | None, str, str, datetime]],
+    days: float,
+) -> dict[str, object]:
+    """Pure detection-quality aggregation (no DB) so it's unit-testable.
+
+    `feedback_rows` = (alert_id, category, confidence, alert_level, verdict,
+    feedback_ts) for every feedback on alerts in the window. Collapses to the
+    LATEST verdict per alert, then derives precision (overall + per category),
+    labelled coverage, confidence calibration, and false-alerts-per-day."""
+    latest: dict[Any, dict[str, Any]] = {}
+    for aid, cat, conf, level, verdict, fts in feedback_rows:
+        prev = latest.get(aid)
+        if prev is None or fts > prev["fts"]:
+            latest[aid] = {
+                "cat": str(cat),
+                "conf": float(conf) if conf is not None else 0.0,
+                "level": str(level),
+                "verdict": str(verdict),
+                "fts": fts,
+            }
+
+    tp = fp = unclear = 0
+    by_cat: dict[str, dict[str, int]] = {}
+    buckets = {b[2]: {"tp": 0, "fp": 0} for b in _CONF_BUCKETS}
+    false_staff_alerts = 0
+    for r in latest.values():
+        v, cat, conf, level = r["verdict"], r["cat"], r["conf"], r["level"]
+        c = by_cat.setdefault(cat, {"true_positive": 0, "false_positive": 0, "unclear": 0})
+        c[v] = c.get(v, 0) + 1
+        if v == "true_positive":
+            tp += 1
+        elif v == "false_positive":
+            fp += 1
+            if level in _STAFF_LEVELS:
+                false_staff_alerts += 1
+        else:
+            unclear += 1
+        if v in ("true_positive", "false_positive"):
+            for low, high, label in _CONF_BUCKETS:
+                if low <= conf < high:
+                    buckets[label]["tp" if v == "true_positive" else "fp"] += 1
+                    break
+
+    return {
+        "range": range_,
+        "total_alerts": total_alerts,
+        "labeled": len(latest),
+        "coverage": round(len(latest) / total_alerts, 3) if total_alerts else 0.0,
+        "tp": tp,
+        "fp": fp,
+        "unclear": unclear,
+        "precision": _precision(tp, fp),
+        "by_category": [
+            {
+                "category": cat,
+                "tp": c["true_positive"],
+                "fp": c["false_positive"],
+                "unclear": c["unclear"],
+                "precision": _precision(c["true_positive"], c["false_positive"]),
+            }
+            for cat, c in sorted(by_cat.items())
+        ],
+        "by_confidence": [
+            {
+                "bucket": label,
+                "tp": buckets[label]["tp"],
+                "fp": buckets[label]["fp"],
+                "tp_rate": _precision(buckets[label]["tp"], buckets[label]["fp"]),
+            }
+            for _, _, label in _CONF_BUCKETS
+        ],
+        "false_alerts_per_day": round(false_staff_alerts / max(1.0, days), 2),
+    }
+
+
+@router.get("/analytics/quality")
+async def quality_analytics(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+    range_: Annotated[str, Query(alias="range")] = "30d",
+) -> dict[str, object]:
+    """Detection-QUALITY metrics derived from staff feedback — answers «how
+    ACCURATE are we?», not just «how many alerts fired». Read-only.
+
+    - precision = TP / (TP + FP) over labelled alerts (unclear excluded), overall
+      and per VLM category.
+    - coverage = labelled alerts / all alerts in range — precision is only as
+      trustworthy as how much got reviewed, so we surface it explicitly.
+    - confidence calibration: TP-rate per confidence bucket — validates whether
+      the alert-level thresholds (0.30 / 0.70 / 0.85) actually track correctness.
+    - false_alerts_per_day = FP-labelled notify/review alerts ÷ days — the
+      alert-fatigue number (the #1 reason staff stop trusting the system).
+
+    Uses the LATEST verdict per alert (an alert can be reviewed more than once),
+    scoped by alert creation time so it reflects the model's recent behaviour."""
+    span = _METRIC_SPANS.get(range_, _METRIC_SPANS["30d"])
+    frm = datetime.now(UTC) - span
+    days = span.total_seconds() / 86400.0
+
+    total_alerts = int(
+        (
+            await db.execute(select(func.count()).select_from(Alert).where(Alert.created_at >= frm))
+        ).scalar()
+        or 0
+    )
+    rows = await db.execute(
+        select(
+            Alert.id,
+            Alert.category,
+            Alert.confidence,
+            Alert.alert_level,
+            Feedback.verdict,
+            Feedback.created_at,
+        )
+        .join(Feedback, Feedback.alert_id == Alert.id)
+        .where(Alert.created_at >= frm)
+    )
+    feedback_rows = [
+        (aid, str(cat), conf, str(level), str(verdict), fts)
+        for aid, cat, conf, level, verdict, fts in rows.all()
+    ]
+    return compute_quality_metrics(range_, total_alerts, feedback_rows, days)
+
+
 @router.get("/orgs", response_model=list[OrganizationPublic])
 async def list_orgs(
     db: Annotated[AsyncSession, Depends(get_db)],
