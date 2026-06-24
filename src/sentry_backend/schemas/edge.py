@@ -33,22 +33,24 @@ class EdgeConfigPayload(BaseModel):
     w_repeated_shelf: float = 3.0
     repeated_shelf_threshold: int = 3
     # Per-behaviour timing gates (must match EdgeConfig): bank a behaviour only
-    # after it's active >= mindur sec, then once per interval sec. 0 = every frame.
-    interval_holding: float = 0.0
-    mindur_holding: float = 0.0
-    interval_wrist_torso: float = 0.0
-    mindur_wrist_torso: float = 0.0
-    interval_conceal: float = 0.0
-    mindur_conceal: float = 0.0
+    # after it's active >= mindur sec, then once per interval sec. Non-zero defaults
+    # make scoring frame-rate independent so a benign sustained pose can't saturate
+    # the score (see EdgeConfig for the rationale). 0 = ungated per-frame.
+    interval_holding: float = 2.0
+    mindur_holding: float = 0.5
+    interval_wrist_torso: float = 3.0
+    mindur_wrist_torso: float = 1.5
+    interval_conceal: float = 0.5
+    mindur_conceal: float = 0.6
     interval_repeated_shelf: float = 0.0
-    mindur_repeated_shelf: float = 0.0
+    mindur_repeated_shelf: float = 0.5
     interval_exit_after_conceal: float = 0.0
-    mindur_exit_after_conceal: float = 0.0
+    mindur_exit_after_conceal: float = 0.3
     reach_frac: float = 0.35
     near_frac: float = 0.18
     min_kp_conf: float = 0.30
     # --- Risk → episode FSM ---
-    decay: float = 0.90
+    decay: float = 0.92
     open_risk: float = 60.0
     close_risk: float = 30.0
     post_quiet_sec: float = 2.0
