@@ -358,6 +358,79 @@ async def quality_analytics(
     return compute_quality_metrics(range_, total_alerts, feedback_rows, days)
 
 
+# Staff verdict → eval ground-truth label. unclear is dropped (not a label).
+_VERDICT_TO_LABEL = {"true_positive": "theft", "false_positive": "benign"}
+
+
+def build_eval_dataset(
+    rows: list[tuple[Any, Any, str, float | None, str, datetime]],
+) -> list[dict[str, object]]:
+    """Turn feedback'd alerts into eval-manifest entries (score mode): latest
+    verdict per alert → ground-truth label, VLM category → prediction. `unclear`
+    verdicts are excluded. Pure (no DB) so it's unit-testable.
+
+    rows = (alert_id, clip_id, category, confidence, verdict, feedback_ts)."""
+    latest: dict[Any, dict[str, Any]] = {}
+    for aid, clip_id, cat, conf, verdict, fts in rows:
+        prev = latest.get(aid)
+        if prev is None or fts > prev["fts"]:
+            latest[aid] = {
+                "clip_id": clip_id,
+                "cat": str(cat),
+                "conf": conf,
+                "verdict": str(verdict),
+                "fts": fts,
+            }
+    entries: list[dict[str, object]] = []
+    for r in latest.values():
+        label = _VERDICT_TO_LABEL.get(r["verdict"])
+        if label is None:  # unclear → not a usable ground-truth label
+            continue
+        entries.append(
+            {
+                "path": str(r["clip_id"]),
+                "label": label,
+                "predicted": r["cat"],
+                "confidence": (float(r["conf"]) if r["conf"] is not None else None),
+            }
+        )
+    return entries
+
+
+@router.get("/eval/dataset")
+async def eval_dataset(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+    range_: Annotated[str, Query(alias="range")] = "30d",
+) -> dict[str, object]:
+    """Export feedback-labelled alerts as an eval manifest (score mode) for the
+    sentry-ai harness: `python -m sentry_ai.eval score dataset.json`. Staff verdict
+    is the ground-truth label (true_positive→theft, false_positive→benign, unclear
+    dropped); the VLM category is the prediction — so it scores PRECISION on real
+    production data with no model run. (Recall needs a curated clip set — see the
+    harness README.) Latest verdict per alert."""
+    span = _METRIC_SPANS.get(range_, _METRIC_SPANS["30d"])
+    frm = datetime.now(UTC) - span
+    rows = await db.execute(
+        select(
+            Alert.id,
+            Alert.clip_id,
+            Alert.category,
+            Alert.confidence,
+            Feedback.verdict,
+            Feedback.created_at,
+        )
+        .join(Feedback, Feedback.alert_id == Alert.id)
+        .where(Alert.created_at >= frm)
+    )
+    dataset_rows = [
+        (aid, clip_id, str(cat), conf, str(verdict), fts)
+        for aid, clip_id, cat, conf, verdict, fts in rows.all()
+    ]
+    clips = build_eval_dataset(dataset_rows)
+    return {"range": range_, "count": len(clips), "clips": clips}
+
+
 @router.get("/orgs", response_model=list[OrganizationPublic])
 async def list_orgs(
     db: Annotated[AsyncSession, Depends(get_db)],
