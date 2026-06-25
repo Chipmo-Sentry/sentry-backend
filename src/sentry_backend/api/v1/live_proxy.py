@@ -13,9 +13,10 @@ MediaMTX read is anonymous on the node, so the proxy needs no upstream creds.
 
 import re
 from typing import Annotated
+from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -81,6 +82,7 @@ def _rewrite_m3u8(text: str, jwt: str) -> str:
 async def hls_proxy(
     path: str,
     filename: str,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     jwt: Annotated[str, Query()] = "",
 ) -> Response:
@@ -93,7 +95,11 @@ async def hls_proxy(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No live node for this camera"
         )
-    upstream = f"{base}/{path}/{filename}"
+    # Forward every query param EXCEPT our own jwt — MediaMTX's low-latency HLS
+    # keys sub-playlists and segments on a `?session=…` param, so dropping the
+    # query would 401 the stream (the bug that left the player on "H.265?").
+    fwd = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "jwt"])
+    upstream = f"{base}/{path}/{filename}" + (f"?{fwd}" if fwd else "")
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             r = await client.get(upstream)
