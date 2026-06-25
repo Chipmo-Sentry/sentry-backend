@@ -94,6 +94,19 @@ def parse_camera_health(telemetry: str | None) -> list[CameraHealth] | None:
         return None
 
 
+def parse_hls_base(telemetry: str | None) -> str | None:
+    """The node's externally-reachable MediaMTX HLS base from its telemetry JSON,
+    used by the live HLS proxy. None for old nodes / no telemetry."""
+    if not telemetry:
+        return None
+    try:
+        data = json.loads(telemetry)
+    except ValueError:
+        return None
+    base = data.get("mediamtx_hls_base") if isinstance(data, dict) else None
+    return base if isinstance(base, str) and base.startswith(("http://", "https://")) else None
+
+
 class ComponentUsage(BaseModel):
     """Per-component CPU/RAM (sentry-ai / Ollama / MediaMTX / Tunnel) — the
     resource breakdown shown in the dashboard. Stored in telemetry JSON."""
@@ -140,6 +153,10 @@ class AiNodeHeartbeat(BaseModel):
     # node, so the dashboard renders the (expected) Ollama-down dot neutral instead
     # of a red alarm. Stored in telemetry JSON; surfaced read-only in superadmin.
     ollama_required: bool | None = None
+    # Externally-reachable MediaMTX HLS base (e.g. http://1.2.3.4:23289), self-
+    # derived from the node's vast.ai env. The backend proxies live HLS to it over
+    # HTTPS so the frontend has no mixed-content / hardcoded-ephemeral-port issue.
+    mediamtx_hls_base: str | None = Field(default=None, max_length=200)
     # Resource load for the observability dashboard (docs/19). GPU fields are
     # None on a CPU-only node.
     cpu_pct: float | None = Field(default=None, ge=0, le=100)
