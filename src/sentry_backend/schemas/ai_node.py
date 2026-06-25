@@ -94,6 +94,20 @@ def parse_camera_health(telemetry: str | None) -> list[CameraHealth] | None:
         return None
 
 
+def parse_served_paths(telemetry: str | None) -> list[str]:
+    """MediaMTX paths the node reports it is currently serving (ready streams).
+    Lets the backend keep the node↔camera link + HLS proxy working when the node
+    runs no analysis worker (edge-first, docs/32 P3). [] for old nodes."""
+    if not telemetry:
+        return []
+    try:
+        data = json.loads(telemetry)
+    except ValueError:
+        return []
+    paths = data.get("mediamtx_paths") if isinstance(data, dict) else None
+    return [p for p in paths if isinstance(p, str)] if isinstance(paths, list) else []
+
+
 def parse_hls_base(telemetry: str | None) -> str | None:
     """The node's externally-reachable MediaMTX HLS base from its telemetry JSON,
     used by the live HLS proxy. None for old nodes / no telemetry."""
@@ -157,6 +171,10 @@ class AiNodeHeartbeat(BaseModel):
     # derived from the node's vast.ai env. The backend proxies live HLS to it over
     # HTTPS so the frontend has no mixed-content / hardcoded-ephemeral-port issue.
     mediamtx_hls_base: str | None = Field(default=None, max_length=200)
+    # MediaMTX paths the node is currently serving (ready streams) — keeps the
+    # node↔camera link + HLS proxy working in edge-first mode where the node runs
+    # no analysis worker (so no per-camera health). docs/32 P3.
+    mediamtx_paths: list[str] | None = Field(default=None, max_length=64)
     # Resource load for the observability dashboard (docs/19). GPU fields are
     # None on a CPU-only node.
     cpu_pct: float | None = Field(default=None, ge=0, le=100)

@@ -22,7 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
 from sentry_backend.repository import ai_node_repo
-from sentry_backend.schemas.ai_node import parse_camera_health, parse_hls_base
+from sentry_backend.schemas.ai_node import (
+    parse_camera_health,
+    parse_hls_base,
+    parse_served_paths,
+)
 from sentry_backend.security import decode_user_token
 
 router = APIRouter(prefix="/api/v1/live", tags=["live"])
@@ -51,7 +55,10 @@ async def _node_hls_base(db: AsyncSession, path: str) -> str | None:
     telemetry.cameras[].camera_id link the pipeline view uses)."""
     for node in await ai_node_repo.list_nodes(db):
         cams = parse_camera_health(node.telemetry) or []
-        if any(c.camera_id == path for c in cams):
+        # Match the analysis worker's cameras (cloud topology) OR the node's served
+        # MediaMTX paths (edge topology: the node relays but doesn't analyse).
+        served = parse_served_paths(node.telemetry)
+        if any(c.camera_id == path for c in cams) or path in served:
             return parse_hls_base(node.telemetry)
     return None
 
