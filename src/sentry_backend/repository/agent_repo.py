@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -141,8 +142,31 @@ async def list_agents_for_store(db: AsyncSession, store_id: UUID) -> list[Agent]
     return list(result.scalars().all())
 
 
+async def list_active_agents_for_org(db: AsyncSession, organization_id: UUID) -> list[Agent]:
+    """Active paired agents across all of an org's stores — for the org-scoped
+    push-status pipeline view."""
+    result = await db.execute(
+        select(Agent)
+        .where(Agent.organization_id == organization_id, Agent.is_active.is_(True))
+        .order_by(Agent.last_seen_at.desc())
+    )
+    return list(result.scalars().all())
+
+
 async def touch_last_seen(db: AsyncSession, agent: Agent) -> None:
     agent.last_seen_at = _now()
+    await db.flush()
+
+
+async def record_heartbeat(
+    db: AsyncSession, agent: Agent, *, push_status: list[dict[str, Any]] | None = None
+) -> None:
+    """Mark the agent seen and (when provided) store its per-camera push-relay
+    state. push_status=None leaves the previous value intact — an older agent that
+    doesn't report it doesn't wipe a value a newer one set."""
+    agent.last_seen_at = _now()
+    if push_status is not None:
+        agent.push_status = push_status
     await db.flush()
 
 

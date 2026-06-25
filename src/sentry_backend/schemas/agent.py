@@ -78,6 +78,40 @@ class AgentCameraUpdate(BaseModel):
     zones: list[Zone] | None = Field(default=None, max_length=MAX_ZONES_PER_CAMERA)
 
 
+class AgentPushEntry(BaseModel):
+    """One camera's ffmpeg push-relay state, as reported by the agent heartbeat."""
+
+    path: str = Field(min_length=1, max_length=255)
+    running: bool = False
+    restarts: int = Field(default=0, ge=0)
+    # Already credential-scrubbed by the agent; bound the length so a runaway
+    # ffmpeg log line can't bloat the row.
+    last_error: str | None = Field(default=None, max_length=500)
+
+
+class AgentHeartbeat(BaseModel):
+    """Optional heartbeat body. Empty body (older agent) is still valid — it just
+    refreshes liveness and leaves any stored push status untouched."""
+
+    push: list[AgentPushEntry] | None = Field(default=None, max_length=64)
+
+
+class AgentPushPath(AgentPushEntry):
+    """A push entry projected to the org pipeline view, with which agent owns it
+    and whether that agent is currently online (heartbeat fresh)."""
+
+    agent_id: UUID
+    agent_name: str | None = None
+    agent_online: bool = True
+
+
+class AgentPushStatusResponse(BaseModel):
+    """Per-camera (mediamtx_path) push state across an org's agents. The frontend
+    matches `path` to its cameras to drive the 'Камер' pipeline stage."""
+
+    paths: list[AgentPushPath]
+
+
 class AgentStreamConfig(BaseModel):
     """Where the agent should publish its camera streams (cloud topology).
 

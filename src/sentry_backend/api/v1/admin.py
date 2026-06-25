@@ -21,6 +21,7 @@ from sentry_backend.deps.db import get_db
 from sentry_backend.repository import (
     ai_node_repo,
     alert_repo,
+    camera_repo,
     edge_config_repo,
     feedback_repo,
     lead_repo,
@@ -33,6 +34,7 @@ from sentry_backend.schemas.admin import (
     AdminStats,
     OrgMemberPublic,
     StoreAdminRow,
+    StoreAdminUpdate,
     UserAdminUpdate,
     would_self_lockout,
 )
@@ -758,9 +760,36 @@ async def list_stores_admin(
             organization_id=str(store.organization_id),
             organization_name=org_name,
             camera_count=cam_n,
+            agent_stream_push_url=store.agent_stream_push_url,
         )
         for store, org_name, cam_n in rows
     ]
+
+
+@router.patch("/stores/{store_id}", response_model=StoreAdminRow)
+async def update_store_admin(
+    store_id: UUID,
+    body: StoreAdminUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> StoreAdminRow:
+    """Superadmin edit of a store's cloud push target. Repoints where the store's
+    agent pushes (e.g. after a vast.ai instance restart changes the IP/port) with
+    no backend redeploy. Empty string clears it back to the global env URL."""
+    store = await store_repo.get_store_any_org(db, store_id)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+    await store_repo.update_store(db, store, agent_stream_push_url=body.agent_stream_push_url)
+    cam_n = await camera_repo.count_cameras_for_store(db, store.id)
+    org = await org_repo.get_org(db, store.organization_id)
+    return StoreAdminRow(
+        id=str(store.id),
+        name=store.name,
+        organization_id=str(store.organization_id),
+        organization_name=org.name if org else "",
+        camera_count=cam_n,
+        agent_stream_push_url=store.agent_stream_push_url,
+    )
 
 
 @router.get("/edge-config", response_model=EdgeConfigAdminView)

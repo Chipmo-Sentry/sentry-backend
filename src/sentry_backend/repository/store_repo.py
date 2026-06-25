@@ -47,6 +47,12 @@ async def get_store(db: AsyncSession, store_id: UUID, org_id: UUID) -> Store | N
     return result.scalar_one_or_none()
 
 
+async def get_store_any_org(db: AsyncSession, store_id: UUID) -> Store | None:
+    """Cross-org store lookup by id — superadmin only (no tenancy filter)."""
+    result = await db.execute(select(Store).where(Store.id == store_id))
+    return result.scalar_one_or_none()
+
+
 async def create_store(
     db: AsyncSession,
     *,
@@ -76,6 +82,7 @@ async def update_store(
     address: str | None = None,
     timezone: str | None = None,
     telegram_chat_id: str | None = None,
+    agent_stream_push_url: str | None = None,
 ) -> Store:
     if name is not None:
         store.name = name
@@ -86,6 +93,9 @@ async def update_store(
     if telegram_chat_id is not None:
         # Empty string clears the override (falls back to the global chat).
         store.telegram_chat_id = telegram_chat_id or None
+    if agent_stream_push_url is not None:
+        # Empty string clears the override (falls back to the global env URL).
+        store.agent_stream_push_url = agent_stream_push_url or None
     await db.flush()
     return store
 

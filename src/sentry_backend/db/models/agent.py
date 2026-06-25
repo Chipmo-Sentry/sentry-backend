@@ -9,9 +9,11 @@ Onboarding flow (M2 agent pairing):
 """
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +38,11 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Per-camera ffmpeg push-relay state from the latest heartbeat, so the cloud
+    # pipeline view can show WHY a push is down (last_error) without RDP-ing into
+    # the store PC. A list of {path, running, restarts, last_error}. Null = the
+    # agent never reported (older build, or pull/on-LAN topology with no relays).
+    push_status: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     paired_by_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
