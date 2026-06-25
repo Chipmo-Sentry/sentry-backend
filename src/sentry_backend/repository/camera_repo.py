@@ -4,7 +4,7 @@ import re
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.camera import Camera
@@ -36,6 +36,13 @@ async def get_camera_for_org(db: AsyncSession, camera_id: UUID, org_id: UUID) ->
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def count_cameras_for_store(db: AsyncSession, store_id: UUID) -> int:
+    result = await db.execute(
+        select(func.count()).select_from(Camera).where(Camera.store_id == store_id)
+    )
+    return int(result.scalar_one())
 
 
 async def store_belongs_to_org(db: AsyncSession, store_id: UUID, org_id: UUID) -> bool:

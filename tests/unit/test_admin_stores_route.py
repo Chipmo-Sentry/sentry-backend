@@ -33,7 +33,12 @@ def client() -> TestClient:
 
 def test_admin_stores_returns_rows(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     sid, oid = uuid4(), uuid4()
-    store = SimpleNamespace(id=sid, name="Дэлгүүр A", organization_id=oid)
+    store = SimpleNamespace(
+        id=sid,
+        name="Дэлгүүр A",
+        organization_id=oid,
+        agent_stream_push_url="rtsp://example:8554",
+    )
 
     async def _rows(_db: object) -> list[tuple[object, str, int]]:
         return [(store, "Org A", 3)]
@@ -50,6 +55,7 @@ def test_admin_stores_returns_rows(client: TestClient, monkeypatch: pytest.Monke
     assert row["organization_id"] == str(oid)
     assert row["organization_name"] == "Org A"
     assert row["camera_count"] == 3
+    assert row["agent_stream_push_url"] == "rtsp://example:8554"
 
 
 def test_admin_stores_empty(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

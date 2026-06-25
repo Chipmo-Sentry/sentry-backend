@@ -19,10 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.tenancy import get_current_organization_id
-from sentry_backend.repository import ai_node_repo, camera_repo
+from sentry_backend.repository import agent_repo, ai_node_repo, camera_repo
+from sentry_backend.schemas.agent import AgentPushPath, AgentPushStatusResponse
 from sentry_backend.schemas.ai_node import OrgNodePublic, build_org_node, parse_camera_health
 
 router = APIRouter(prefix="/api/v1/nodes", tags=["nodes"])
+
+# An agent heartbeats every ~30s; treat it offline if we haven't heard in 90s.
+_AGENT_ONLINE_WINDOW = timedelta(seconds=90)
 
 _METRIC_SPANS = {
     "1h": timedelta(hours=1),
@@ -55,6 +59,41 @@ async def list_org_nodes(
         if projected is not None:
             out.append(projected)
     return out
+
+
+@router.get("/agent-push", response_model=AgentPushStatusResponse)
+async def org_agent_push(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+) -> AgentPushStatusResponse:
+    """Per-camera ffmpeg push-relay state across this org's store agents, keyed by
+    mediamtx_path. Drives the 'Камер' pipeline stage: a down relay shows the real
+    reason (last_error) instead of just 'кадр зогссон'. Cameras whose agent never
+    reported push (pull/on-LAN topology, older agent) simply don't appear here, so
+    the frontend keeps its WS-based fallback for them."""
+    now = datetime.now(UTC)
+    agents = await agent_repo.list_active_agents_for_org(db, org_id)
+    out: list[AgentPushPath] = []
+    for agent in agents:
+        if not agent.push_status:
+            continue
+        online = agent.last_seen_at is not None and now - agent.last_seen_at < _AGENT_ONLINE_WINDOW
+        for entry in agent.push_status:
+            path = entry.get("path")
+            if not isinstance(path, str) or not path:
+                continue
+            out.append(
+                AgentPushPath(
+                    path=path,
+                    running=bool(entry.get("running")),
+                    restarts=int(entry.get("restarts") or 0),
+                    last_error=entry.get("last_error"),
+                    agent_id=agent.id,
+                    agent_name=agent.name,
+                    agent_online=online,
+                )
+            )
+    return AgentPushStatusResponse(paths=out)
 
 
 @router.get("/{node_id}/metrics")

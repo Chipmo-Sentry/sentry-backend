@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from sentry_backend.db.models.organization import OrgRole
 from sentry_backend.schemas.alert import AlertPublic
@@ -71,6 +71,16 @@ class StoreAdminRow(BaseModel):
     organization_id: str
     organization_name: str
     camera_count: int = 0
+    # Per-store cloud push target (None → global AGENT_STREAM_PUSH_URL env). Shown
+    # and editable in superadmin so a vast.ai restart can be repointed live.
+    agent_stream_push_url: str | None = None
+
+
+class StoreAdminUpdate(BaseModel):
+    """Superadmin partial store edit. Only the per-store push target for now;
+    empty string clears it (back to the global env URL)."""
+
+    agent_stream_push_url: str | None = Field(default=None, max_length=500)
 
 
 class AdminAlertRow(AlertPublic):

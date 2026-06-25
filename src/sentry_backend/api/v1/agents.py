@@ -30,10 +30,12 @@ from sentry_backend.repository import (
     camera_repo,
     clip_repo,
     edge_config_repo,
+    store_repo,
 )
 from sentry_backend.schemas.agent import (
     AgentCameraCreate,
     AgentCameraUpdate,
+    AgentHeartbeat,
     AgentPairRequest,
     AgentPairResult,
     AgentPublic,
@@ -322,18 +324,24 @@ async def agent_delete_camera(
 
 @router.get("/agent/stream-config", response_model=AgentStreamConfig)
 async def agent_stream_config(
-    _agent: Annotated[Agent, Depends(get_current_agent)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
 ) -> AgentStreamConfig:
     """Tell a paired agent where (and whether) to publish its camera streams.
 
     push_enabled=True → cloud topology: the agent runs ffmpeg relays pushing
     each LAN camera to `push_rtsp_base/<mediamtx_path>`. False → MediaMTX pulls
     cameras directly (local/on-LAN) and the agent pushes nothing.
+
+    The per-store `agent_stream_push_url` (editable from superadmin) wins over the
+    global env, so a vast.ai restart can be repointed without a backend redeploy.
     """
     s = get_settings()
+    store = await store_repo.get_store_any_org(db, agent.store_id)
+    push_base = (store.agent_stream_push_url if store else None) or s.agent_stream_push_url
     return AgentStreamConfig(
-        push_enabled=bool(s.agent_stream_push_url),
-        push_rtsp_base=s.agent_stream_push_url,
+        push_enabled=bool(push_base),
+        push_rtsp_base=push_base,
         publish_user=s.mediamtx_publish_user,
         publish_pass=s.mediamtx_publish_pass,
     )
@@ -513,8 +521,13 @@ async def agent_edge_clip(
 async def agent_heartbeat(
     db: Annotated[AsyncSession, Depends(get_db)],
     agent: Annotated[Agent, Depends(get_current_agent)],
+    body: AgentHeartbeat | None = None,
 ) -> None:
-    await agent_repo.touch_last_seen(db, agent)
+    # Store per-camera push-relay state when the agent reports it (newer build), so
+    # the cloud pipeline can show WHY a push is down. An empty body just refreshes
+    # liveness and leaves any previously stored push status intact.
+    push = [e.model_dump() for e in body.push] if body and body.push is not None else None
+    await agent_repo.record_heartbeat(db, agent, push_status=push)
     await event_log.emit(
         db,
         event_type=EventType.agent_heartbeat,
