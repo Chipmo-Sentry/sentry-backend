@@ -136,6 +136,10 @@ class AiNodeHeartbeat(BaseModel):
     # "ingest": false, "ai": true}). Opaque map so the node can add keys
     # without a schema change; surfaced read-only in superadmin.
     health: dict[str, bool] | None = None
+    # Whether the effective VLM provider actually needs Ollama. False on a vLLM
+    # node, so the dashboard renders the (expected) Ollama-down dot neutral instead
+    # of a red alarm. Stored in telemetry JSON; surfaced read-only in superadmin.
+    ollama_required: bool | None = None
     # Resource load for the observability dashboard (docs/19). GPU fields are
     # None on a CPU-only node.
     cpu_pct: float | None = Field(default=None, ge=0, le=100)
