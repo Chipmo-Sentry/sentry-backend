@@ -89,6 +89,10 @@ class StreamTokenResponse(BaseModel):
 
     token: str
     expires_in: int
+    # Same-origin HTTPS HLS URL proxied through the backend to the camera's node
+    # (avoids mixed-content + the node's ephemeral address). The frontend prefers
+    # this over any build-time MediaMTX base.
+    hls_url: str | None = None
 
 
 class CameraPublic(BaseModel):

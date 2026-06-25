@@ -27,6 +27,7 @@ from sentry_backend.api.v1 import feedback as feedback_v1
 from sentry_backend.api.v1 import ingest as ingest_v1
 from sentry_backend.api.v1 import internal as internal_v1
 from sentry_backend.api.v1 import leads as leads_v1
+from sentry_backend.api.v1 import live_proxy as live_proxy_v1
 from sentry_backend.api.v1 import node_diag as node_diag_v1
 from sentry_backend.api.v1 import nodes as nodes_v1
 from sentry_backend.api.v1 import org_team as org_team_v1
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(agents_v1.router)
     app.include_router(ai_nodes_v1.router)
     app.include_router(nodes_v1.router)
+    app.include_router(live_proxy_v1.router)
     app.include_router(node_diag_v1.router)
     app.include_router(ingest_v1.router)
     app.include_router(behaviors_v1.router)

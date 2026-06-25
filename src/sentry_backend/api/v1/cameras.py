@@ -117,9 +117,11 @@ async def get_stream_token(
             status_code=status.HTTP_409_CONFLICT,
             detail="Энэ камерт шууд дамжуулалтын зам тохируулаагүй байна.",
         )
+    token = create_stream_token(cam.mediamtx_path)
     return StreamTokenResponse(
-        token=create_stream_token(cam.mediamtx_path),
+        token=token,
         expires_in=get_settings().stream_token_ttl_sec,
+        hls_url=f"/api/v1/live/{cam.mediamtx_path}/hls/index.m3u8?jwt={token}",
     )
 
 
