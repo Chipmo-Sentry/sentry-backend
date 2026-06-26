@@ -3,7 +3,18 @@
 from __future__ import annotations
 
 from sentry_backend.api.v1.live_proxy import _rewrite_m3u8, _token_ok, _with_token
+from sentry_backend.schemas.ai_node import parse_served_paths
 from sentry_backend.security import create_stream_token
+
+
+def test_parse_served_paths() -> None:
+    assert parse_served_paths('{"mediamtx_paths": ["192_168_1_64", "cam_b"]}') == [
+        "192_168_1_64",
+        "cam_b",
+    ]
+    assert parse_served_paths('{"other": 1}') == []  # old node / no field
+    assert parse_served_paths(None) == []
+    assert parse_served_paths("not json") == []
 
 
 def test_token_ok_accepts_matching_path() -> None:
