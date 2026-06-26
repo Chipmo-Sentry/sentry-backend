@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.api.v1.internal import LiveMetadataBatch
 from sentry_backend.db.models.agent import Agent
 from sentry_backend.db.models.alert import AlertCategory, AlertLevel, AlertTrigger
 from sentry_backend.db.models.event_log import EventSeverity, EventType
@@ -51,6 +52,7 @@ from sentry_backend.services import ai_service, alert_notify, event_log, live_pr
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.clip_service import ClipTooLargeError, save_upload_to_disk
+from sentry_backend.services.live_broker import get_live_broker
 from sentry_backend.settings import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
@@ -515,6 +517,28 @@ async def agent_edge_clip(
     # dashboard exactly like cloud-path (verify_clip_with_ai) alerts.
     await get_broker().publish(alert_public.organization_id, alert_public.model_dump(mode="json"))
     return alert_public
+
+
+@router.post("/agent/live-metadata", status_code=status.HTTP_202_ACCEPTED)
+async def agent_live_metadata(
+    _agent: Annotated[Agent, Depends(get_current_agent)],
+    body: LiveMetadataBatch,
+) -> dict[str, int]:
+    """Edge Stage-1 live overlay feed (ADR-0029, edge-first). The agent's edge
+    engine POSTs per-frame tracks so the browser live overlay shows EDGE boxes
+    when the node runs no live analysis.
+
+    Publishes to the WS live broker ONLY — deliberately NOT through the threshold
+    handler (which `/internal/live-metadata` runs) — so the EDGE alone, via
+    `/agent/edge/clips` → VLM, decides alerts; this overlay path NEVER creates one.
+    The agent JWT scopes trust to its store; `camera_id` is the mediamtx_path.
+    """
+    broker = get_live_broker()
+    published = 0
+    for frame in body.frames:
+        await broker.publish(frame.camera_id, frame.model_dump(mode="json"))
+        published += 1
+    return {"received": len(body.frames), "published": published}
 
 
 @router.post("/agent/heartbeat", status_code=status.HTTP_204_NO_CONTENT)
