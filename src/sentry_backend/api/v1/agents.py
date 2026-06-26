@@ -425,6 +425,7 @@ async def agent_edge_clip(
     started_at: Annotated[float, Form()] = 0.0,
     ended_at: Annotated[float, Form()] = 0.0,
     edge_behavior_detail: Annotated[str | None, Form()] = None,
+    clip_id: Annotated[str | None, Form()] = None,
 ) -> AlertPublic:
     """Edge Stage-1 (ADR-0029): the store agent ran YOLO + behaviour LOCALLY and
     uploads ONE suspicious clip. We store it, get the VLM verdict from sentry-ai
@@ -507,6 +508,7 @@ async def agent_edge_clip(
         triggered_behaviors=behaviors_list or None,
         triggered_behavior_detail=edge_detail,
         embedding=embedding,
+        edge_clip_id=clip_id,
     )
     alert_public = AlertPublic.model_validate(alert)
     # I2 — best-effort Telegram for actionable edge alerts (gated to notify/review

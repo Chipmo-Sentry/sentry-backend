@@ -107,3 +107,8 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Phase 4 RAG). Lets staff feedback create a verified_case for retrieval
     # WITHOUT a second embed round-trip. Null on live-threshold alerts.
     embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), nullable=True)
+    # Edge-first traceability: the agent-pc edge clip id (`{camera_id}_{epoch}`)
+    # that produced this alert. Lets the store operator match a row in the
+    # agent-pc «Сэжигтэй» list to its frontend «Сэжигтэй үйлдэл» alert. Only set
+    # for triggered_by=edge_pc_upload; null for every cloud/live/manual alert.
+    edge_clip_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)

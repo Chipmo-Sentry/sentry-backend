@@ -22,6 +22,10 @@ class AlertPublic(BaseModel):
 
     id: UUID
     clip_id: UUID
+    # Edge-first traceability: the agent-pc edge clip id (`{camera_id}_{epoch}`)
+    # behind this alert. Shown as an "ID" column so the store operator can match
+    # an agent-pc «Сэжигтэй» row to its frontend alert. Null for cloud/manual.
+    edge_clip_id: str | None = None
     organization_id: UUID
     store_id: UUID | None
     camera_id: UUID | None
