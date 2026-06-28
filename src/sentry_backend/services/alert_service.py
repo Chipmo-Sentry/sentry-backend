@@ -6,23 +6,20 @@ from sentry_backend.db.models.alert import AlertCategory, AlertLevel
 def derive_alert_level(category: AlertCategory, confidence: float) -> AlertLevel:
     """Translate VLM verdict into actionable level.
 
-    Tuning knob — adjust thresholds as we learn from real feedback.
+    Evidence clips should only be retained for theft or attempted theft:
+    concealment into clothing/pockets or bags. Visible shopping actions are
+    ignored so they do not create saved evidence clips.
     """
-    # Browsing / low-confidence is NOT hidden: the node now surfaces every
-    # sustained breach (with its clip) so the operator can review it. These land
-    # at "log" (Бүртгэсэн) — visible in the menu but out of notify/review — so a
-    # detected episode is never silently dropped, just deprioritised.
-    if category == AlertCategory.browsing or confidence < 0.30:
-        return AlertLevel.log
-    if category == AlertCategory.other:
-        return AlertLevel.log
-    if category == AlertCategory.cart_pickup:
-        return AlertLevel.log if confidence < 0.70 else AlertLevel.notify
-    # Concealment (pocket OR bag) is the theft signal — both escalate the same way.
+    if category in (AlertCategory.browsing, AlertCategory.cart_pickup, AlertCategory.other):
+        return AlertLevel.ignore
+
     if category in (AlertCategory.pocket_conceal, AlertCategory.bag_conceal):
+        if confidence < 0.50:
+            return AlertLevel.ignore
         if confidence >= 0.85:
             return AlertLevel.review
         if confidence >= 0.70:
             return AlertLevel.notify
         return AlertLevel.log
-    return AlertLevel.log
+
+    return AlertLevel.ignore

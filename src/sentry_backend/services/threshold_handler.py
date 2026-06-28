@@ -778,6 +778,15 @@ async def create_live_alert(
         return None
 
     level = derive_alert_level(category, confidence)
+    if level == AlertLevel.ignore:
+        log.info(
+            "live_alert.vlm_cleared",
+            mediamtx_path=mediamtx_path,
+            person_id=person_id,
+            category=category.value,
+            confidence=confidence,
+        )
+        return None
 
     # Debounce: the VLM-primary scan fires every few seconds, so without this the
     # menu floods with repeat "browsing" rows. Suppress a new alert only if a

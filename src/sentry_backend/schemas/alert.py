@@ -107,7 +107,7 @@ class BreachClearedCreate(BaseModel):
     it on the activity timeline so the detection funnel is visible + tunable."""
 
     camera_id: str = Field(min_length=1)  # Camera.mediamtx_path
-    # Why no alert: "vlm_browsing" | "vlm_low_confidence" | "cut_failed" | other.
+    # Why no alert: "vlm_cleared" | "cut_failed" | other.
     reason: str = Field(min_length=1, max_length=64)
     peak_risk_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     person_id: int | None = None
