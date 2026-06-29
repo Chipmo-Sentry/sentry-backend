@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentry_backend.api.v1.internal import LiveMetadataBatch
 from sentry_backend.db.models.agent import Agent
 from sentry_backend.db.models.alert import AlertCategory, AlertLevel, AlertTrigger
+from sentry_backend.db.models.camera import Camera
 from sentry_backend.db.models.event_log import EventSeverity, EventType
 from sentry_backend.db.models.organization import OrganizationMember, OrgRole
 from sentry_backend.db.models.store import Store
@@ -204,20 +205,43 @@ async def agent_register_camera(
     db: Annotated[AsyncSession, Depends(get_db)],
     agent: Annotated[Agent, Depends(get_current_agent)],
 ) -> CameraPublic:
-    cam = await camera_repo.create_camera(
-        db,
-        store_id=agent.store_id,
-        org_id=agent.organization_id,
-        name=body.name,
-        rtsp_url=body.rtsp_url,
-        shelf_zone_json=None,
-        stage2_threshold=0.6,
-        enabled=True,
-        mediamtx_path=body.mediamtx_path,
-        risk_threshold=body.risk_threshold,
-        compute_tier=body.compute_tier.value,
-        zones=[z.model_dump() for z in body.zones] if body.zones is not None else None,
+    # Re-registering the SAME camera (same mediamtx_path on this store) UPDATES it
+    # rather than churning a new row — so its compute_tier (edge_pc!) and zones
+    # survive. The agent's create body always carries the DEFAULT compute_tier
+    # (cloud — it has no UI to choose), so on an update we deliberately do NOT pass
+    # it (None = keep the stored value), refreshing only the connection (rtsp) the
+    # operator just re-entered + the name/threshold.
+    existing = (
+        await camera_repo.get_camera_by_store_path(db, agent.store_id, body.mediamtx_path)
+        if body.mediamtx_path
+        else None
     )
+    cam: Camera | None
+    if existing is not None:
+        cam = await camera_repo.update_camera(
+            db,
+            existing,
+            name=body.name,
+            rtsp_url=body.rtsp_url,
+            risk_threshold=body.risk_threshold,
+            compute_tier=None,  # preserve the stored tier (don't reset edge_pc → cloud)
+            zones=[z.model_dump() for z in body.zones] if body.zones is not None else None,
+        )
+    else:
+        cam = await camera_repo.create_camera(
+            db,
+            store_id=agent.store_id,
+            org_id=agent.organization_id,
+            name=body.name,
+            rtsp_url=body.rtsp_url,
+            shelf_zone_json=None,
+            stage2_threshold=0.6,
+            enabled=True,
+            mediamtx_path=body.mediamtx_path,
+            risk_threshold=body.risk_threshold,
+            compute_tier=body.compute_tier.value,
+            zones=[z.model_dump() for z in body.zones] if body.zones is not None else None,
+        )
     if cam is None:
         # Store vanished or got reassigned out of the agent's org.
         raise HTTPException(
