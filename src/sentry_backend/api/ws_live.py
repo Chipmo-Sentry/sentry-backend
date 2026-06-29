@@ -132,14 +132,23 @@ async def ws_live(
 
         receiver_task = asyncio.create_task(_client_receiver())
         try:
-            while True:
+            # Loop while the client is connected. Check `receiver_task.done()` up
+            # front so we never try to send on a socket the client already closed.
+            while not receiver_task.done():
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    await websocket.send_json(payload)
                 except TimeoutError:
-                    # heartbeat — also helps detect dead connections
-                    await websocket.send_json({"_type": "heartbeat"})
-                if receiver_task.done():
+                    # No overlay metadata for 15s — the AI node / edge agent isn't
+                    # posting tracks (node offline, or no people in frame). Heartbeat
+                    # keeps the socket alive; the video itself comes over HLS, so an
+                    # empty overlay is not an error.
+                    payload = {"_type": "heartbeat"}
+                try:
+                    await websocket.send_json(payload)
+                except (WebSocketDisconnect, RuntimeError):
+                    # Client vanished between our done()-check and the send (ASGI
+                    # raises RuntimeError when sending after the socket closed). A
+                    # normal disconnect — exit cleanly, don't log it as an error.
                     break
         finally:
             receiver_task.cancel()
