@@ -21,6 +21,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.deps.db import get_db
+from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import ai_node_repo
 from sentry_backend.schemas.ai_node import (
     parse_camera_health,
@@ -30,6 +31,7 @@ from sentry_backend.schemas.ai_node import (
 from sentry_backend.security import decode_user_token
 
 router = APIRouter(prefix="/api/v1/live", tags=["live"])
+log = get_logger("sentry_backend.live_proxy")
 
 _CONTENT_TYPES = {
     "m3u8": "application/vnd.apple.mpegurl",
@@ -99,8 +101,12 @@ async def hls_proxy(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid stream token")
     base = await _node_hls_base(db, path)
     if not base:
+        # No online AI node is linked to this camera (none paired, or the node
+        # hasn't heart-beat recently so it dropped out of the served-path map).
+        log.warning("hls_proxy.no_node", camera_path=path)
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No live node for this camera"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Камерт холбогдсон идэвхтэй AI зангилаа алга (зангилаа офлайн байж магадгүй).",
         )
     # Forward every query param EXCEPT our own jwt — MediaMTX's low-latency HLS
     # keys sub-playlists and segments on a `?session=…` param, so dropping the
@@ -111,12 +117,21 @@ async def hls_proxy(
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             r = await client.get(upstream)
     except httpx.HTTPError as e:
+        # The node's MediaMTX never answered — the AI node is offline/unreachable
+        # (vast.ai instance stopped, network/tunnel down). One clear line, no
+        # stack trace, naming the cause + the host we tried.
+        log.warning("hls_proxy.node_unreachable", camera_path=path, base=base, error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Upstream unreachable: {e}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI зангилаа холбогдсонгүй (офлайн). Зангилаагаа эхлүүлээд дахин оролдоно уу.",
         ) from e
     if r.status_code != 200:
+        # The node answered but isn't serving this path — the camera isn't
+        # publishing to it (agent not pushing, or a path mismatch).
+        log.warning("hls_proxy.stream_unavailable", camera_path=path, upstream_status=r.status_code)
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Upstream {r.status_code}"
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Камерын стрим зангилаа дээр алга (камер дамжуулж байгаа эсэхийг шалгана уу).",
         )
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext == "m3u8":
