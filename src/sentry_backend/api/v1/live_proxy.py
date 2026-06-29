@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -134,9 +134,21 @@ async def hls_proxy(
     HTTPS. Playlists are rewritten to keep the token on every nested request."""
     if not _token_ok(jwt, path):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid stream token")
-    # Prefer the agent's own cloudflared tunnel (video straight from the store PC,
-    # node-independent); fall back to the node relay when no fresh tunnel exists.
-    base = await _agent_tunnel_base(db, path) or await _node_hls_base(db, path)
+    # Agent's HTTPS cloudflared tunnel → REDIRECT the player straight to it instead
+    # of proxying. MediaMTX's HLS `?session` is bound to the CLIENT IP; proxying it
+    # through our multi-worker backend (each worker a different egress IP) means the
+    # master is fetched by one IP and the sub-playlist by another → MediaMTX 401s
+    # the sub. Redirecting makes hls.js talk to MediaMTX as ONE client, so the
+    # session stays consistent (master + sub + segments all from the browser). Auth
+    # is enforced here (jwt verified above); the tunnel URL is the post-auth secret.
+    agent_base = await _agent_tunnel_base(db, path)
+    if agent_base:
+        fwd = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "jwt"])
+        target = f"{agent_base}/{path}/{filename}" + (f"?{fwd}" if fwd else "")
+        return RedirectResponse(target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    # No fresh agent tunnel → fall back to proxying the node relay. (The node serves
+    # HTTP, so we MUST proxy for HTTPS + can't redirect the browser to mixed content.)
+    base = await _node_hls_base(db, path)
     if not base:
         # No online AI node is linked to this camera (none paired, or the node
         # hasn't heart-beat recently so it dropped out of the served-path map).
