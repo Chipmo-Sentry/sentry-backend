@@ -94,6 +94,10 @@ class AgentHeartbeat(BaseModel):
     refreshes liveness and leaves any stored push status untouched."""
 
     push: list[AgentPushEntry] | None = Field(default=None, max_length=64)
+    # Public cloudflared HLS base (`https://<rand>.trycloudflare.com`) for this
+    # agent, so /live proxies video straight from the agent (no GPU-node relay).
+    # Bounded; None leaves the stored value untouched.
+    hls_tunnel_base: str | None = Field(default=None, max_length=255)
 
 
 class AgentPushPath(AgentPushEntry):

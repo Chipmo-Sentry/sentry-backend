@@ -12,14 +12,18 @@ MediaMTX read is anonymous on the node, so the proxy needs no upstream creds.
 """
 
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.agent import Agent
+from sentry_backend.db.models.camera import Camera
 from sentry_backend.deps.db import get_db
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import ai_node_repo
@@ -65,6 +69,37 @@ async def _node_hls_base(db: AsyncSession, path: str) -> str | None:
     return None
 
 
+# The agent's reported tunnel base is only valid while it's heart-beating (the
+# cloudflared tunnel dies with the agent), so ignore a stale one and fall back to
+# the node. ~90s tolerates one or two missed 30s heartbeats.
+_AGENT_TUNNEL_FRESH_SEC = 90
+
+
+async def _agent_tunnel_base(db: AsyncSession, path: str) -> str | None:
+    """Public HLS base of the store agent serving `path` via its cloudflared
+    tunnel, if the agent is currently heart-beating — so the cloud frontend pulls
+    video STRAIGHT from the agent and never depends on the (optional) GPU node.
+    None → no fresh tunnel; the caller falls back to the node relay."""
+    store_id = (
+        await db.execute(select(Camera.store_id).where(Camera.mediamtx_path == path))
+    ).scalar_one_or_none()
+    if store_id is None:
+        return None
+    cutoff = datetime.now(UTC) - timedelta(seconds=_AGENT_TUNNEL_FRESH_SEC)
+    return (
+        await db.execute(
+            select(Agent.hls_tunnel_base)
+            .where(
+                Agent.store_id == store_id,
+                Agent.hls_tunnel_base.is_not(None),
+                Agent.last_seen_at >= cutoff,
+            )
+            .order_by(Agent.last_seen_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 def _with_token(uri: str, jwt: str) -> str:
     # Absolute URIs (shouldn't occur for MediaMTX HLS) are left untouched.
     if not uri or uri.startswith(("http://", "https://")):
@@ -99,7 +134,9 @@ async def hls_proxy(
     HTTPS. Playlists are rewritten to keep the token on every nested request."""
     if not _token_ok(jwt, path):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid stream token")
-    base = await _node_hls_base(db, path)
+    # Prefer the agent's own cloudflared tunnel (video straight from the store PC,
+    # node-independent); fall back to the node relay when no fresh tunnel exists.
+    base = await _agent_tunnel_base(db, path) or await _node_hls_base(db, path)
     if not base:
         # No online AI node is linked to this camera (none paired, or the node
         # hasn't heart-beat recently so it dropped out of the served-path map).

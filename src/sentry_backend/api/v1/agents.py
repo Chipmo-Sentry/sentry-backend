@@ -553,7 +553,8 @@ async def agent_heartbeat(
     # the cloud pipeline can show WHY a push is down. An empty body just refreshes
     # liveness and leaves any previously stored push status intact.
     push = [e.model_dump() for e in body.push] if body and body.push is not None else None
-    await agent_repo.record_heartbeat(db, agent, push_status=push)
+    hls_tunnel_base = body.hls_tunnel_base if body else None
+    await agent_repo.record_heartbeat(db, agent, push_status=push, hls_tunnel_base=hls_tunnel_base)
     await event_log.emit(
         db,
         event_type=EventType.agent_heartbeat,
