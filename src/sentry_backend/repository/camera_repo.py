@@ -52,6 +52,18 @@ async def store_belongs_to_org(db: AsyncSession, store_id: UUID, org_id: UUID) -
     return result.scalar_one_or_none() is not None
 
 
+async def get_camera_by_store_path(
+    db: AsyncSession, store_id: UUID, mediamtx_path: str
+) -> Camera | None:
+    """The store's camera on this mediamtx_path, or None. Lets the agent re-register
+    the SAME camera (same path) as an UPDATE instead of churning a new row — so its
+    compute_tier / zones survive a re-register."""
+    result = await db.execute(
+        select(Camera).where(Camera.store_id == store_id, Camera.mediamtx_path == mediamtx_path)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_camera(
     db: AsyncSession,
     *,
