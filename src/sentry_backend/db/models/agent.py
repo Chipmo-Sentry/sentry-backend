@@ -43,6 +43,11 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # the store PC. A list of {path, running, restarts, last_error}. Null = the
     # agent never reported (older build, or pull/on-LAN topology with no relays).
     push_status: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    # Public cloudflared HLS base (`https://<rand>.trycloudflare.com`) the agent
+    # reports each heartbeat, so /live proxies video straight from the agent (no
+    # GPU-node relay). Ephemeral — changes when cloudflared restarts. Null = no
+    # tunnel (older build / disabled) → /live falls back to the node relay.
+    hls_tunnel_base: Mapped[str | None] = mapped_column(String(255), nullable=True)
     paired_by_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

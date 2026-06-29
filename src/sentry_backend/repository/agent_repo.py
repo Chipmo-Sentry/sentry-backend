@@ -159,14 +159,20 @@ async def touch_last_seen(db: AsyncSession, agent: Agent) -> None:
 
 
 async def record_heartbeat(
-    db: AsyncSession, agent: Agent, *, push_status: list[dict[str, Any]] | None = None
+    db: AsyncSession,
+    agent: Agent,
+    *,
+    push_status: list[dict[str, Any]] | None = None,
+    hls_tunnel_base: str | None = None,
 ) -> None:
     """Mark the agent seen and (when provided) store its per-camera push-relay
-    state. push_status=None leaves the previous value intact — an older agent that
-    doesn't report it doesn't wipe a value a newer one set."""
+    state + public HLS tunnel base. A None field leaves the previous value intact —
+    an older agent that doesn't report it doesn't wipe a value a newer one set."""
     agent.last_seen_at = _now()
     if push_status is not None:
         agent.push_status = push_status
+    if hls_tunnel_base is not None:
+        agent.hls_tunnel_base = hls_tunnel_base
     await db.flush()
 
 
