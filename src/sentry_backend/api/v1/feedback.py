@@ -47,5 +47,8 @@ async def post_feedback(
             category=str(alert.category) if alert.category else None,
             description=alert.reasoning,
             embedding=list(alert.embedding),
+            # Фаз 0 (ADR-0030): pair the captured skeleton trajectory with the
+            # staff verdict → a labelled training row for the skeleton-anomaly model.
+            pose_sequence=alert.pose_sequence,
         )
     return FeedbackPublic.model_validate(fb)

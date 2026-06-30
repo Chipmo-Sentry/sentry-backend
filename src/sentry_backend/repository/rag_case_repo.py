@@ -6,6 +6,7 @@ Pilot scale → we fetch a store's recent cases and rank in Python; no pgvector.
 from __future__ import annotations
 
 import math
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -25,6 +26,7 @@ async def add_case(
     category: str | None,
     description: str,
     embedding: list[float],
+    pose_sequence: list[dict[str, Any]] | None = None,
 ) -> VerifiedCase:
     case = VerifiedCase(
         store_id=store_id,
@@ -32,6 +34,7 @@ async def add_case(
         category=category,
         description=description,
         embedding=embedding,
+        pose_sequence=pose_sequence,
     )
     db.add(case)
     await db.flush()

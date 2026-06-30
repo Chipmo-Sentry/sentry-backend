@@ -764,6 +764,7 @@ async def create_live_alert(
     behaviors: list[str] | None = None,
     sequences: list[str] | None = None,
     behavior_detail: list[dict[str, Any]] | None = None,
+    pose_sequence: list[dict[str, Any]] | None = None,
 ) -> AlertPublic | None:
     """Node-push path: the AI node detected the breach, cut + VLM-verified the
     clip LOCALLY, and POSTed the finished result here (outbound = reliable,
@@ -862,6 +863,7 @@ async def create_live_alert(
             triggered_sequences=sequences or None,
             triggered_behavior_detail=behavior_detail or None,
             embedding=embedding,
+            pose_sequence=pose_sequence or None,
         )
         alert_public = AlertPublic.model_validate(alert)
         await alert_notify.notify_alert(db, alert)

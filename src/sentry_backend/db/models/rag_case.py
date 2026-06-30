@@ -10,9 +10,11 @@ Embeddings are stored as a plain float array (model-agnostic length) and ranked
 by cosine similarity in Python — no pgvector extension needed at pilot scale.
 """
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import ARRAY, Float, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,3 +40,8 @@ class VerifiedCase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     # Embedding of `description` (length = the embed model's dim; e.g. 768).
     embedding: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)
+    # Фаз 0 training data (ADR-0030): the verified episode's pose trajectory
+    # (skeleton only), copied from the alert at verify time. This + `verdict` is a
+    # labelled training row for the per-store skeleton-anomaly model. Null on
+    # text-only cases / older alerts that carried no pose.
+    pose_sequence: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)

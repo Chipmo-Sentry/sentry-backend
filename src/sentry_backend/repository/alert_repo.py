@@ -124,6 +124,7 @@ async def create_alert(
     triggered_behavior_detail: list[dict[str, Any]] | None = None,
     embedding: list[float] | None = None,
     edge_clip_id: str | None = None,
+    pose_sequence: list[dict[str, Any]] | None = None,
 ) -> Alert:
     alert = Alert(
         clip_id=clip_id,
@@ -145,6 +146,7 @@ async def create_alert(
         triggered_behavior_detail=triggered_behavior_detail,
         embedding=embedding,
         edge_clip_id=edge_clip_id,
+        pose_sequence=pose_sequence,
     )
     db.add(alert)
     await db.flush()

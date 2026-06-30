@@ -238,6 +238,7 @@ async def create_live_alert_from_node(
         behaviors=body.triggered_behaviors,
         sequences=body.triggered_sequences,
         behavior_detail=detail,
+        pose_sequence=body.pose_sequence,
     )
     if alert is None:
         raise HTTPException(
