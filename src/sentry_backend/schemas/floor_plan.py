@@ -53,9 +53,13 @@ class FloorFixture(BaseModel):
 
 
 class CalibPoint(BaseModel):
-    """One calibration pair: a NORMALIZED 0-1 camera-image point ↔ a plan point."""
+    """One calibration pair: a NORMALIZED 0-1 camera-image point ↔ a plan point.
 
-    img: tuple[float, float]
+    NB: the field is `image` (not `img`) — the agent editor + `_compute_calibration`
+    both emit/read `image`. A `img` field silently 422'd every calibration save
+    (missing-required), so zones never persisted."""
+
+    image: tuple[float, float]
     plan: tuple[float, float]
 
 
@@ -63,9 +67,12 @@ class FloorCamera(BaseModel):
     """A camera placed on the plan + its homography (set during calibration)."""
 
     camera_id: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, max_length=128)  # display label (round-trips)
     pos: tuple[float, float]
     dir_deg: float = 0.0
-    # 3×3 homography: normalized-image (0-1) → plan coords. None until calibrated.
+    # 3×3 homography: PLAN → normalized-image (0-1). None until calibrated.
+    # (This is what cv2.findHomography(plan, img) yields in _compute_calibration;
+    # invert it for image→plan, e.g. a coverage footprint.)
     homography: list[list[float]] | None = None
     reproj_err: float | None = None
     calib_points: list[CalibPoint] | None = Field(default=None, max_length=MAX_CALIB_POINTS)
