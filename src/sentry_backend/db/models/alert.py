@@ -112,3 +112,10 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # agent-pc «Сэжигтэй» list to its frontend «Сэжигтэй үйлдэл» alert. Only set
     # for triggered_by=edge_pc_upload; null for every cloud/live/manual alert.
     edge_clip_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    # Фаз 0 training data (ADR-0030): the breaching person's pose trajectory over
+    # the episode — a list of {frame_idx, ts_ms, keypoints (17×3 [x,y,conf]), box}.
+    # Skeleton ONLY (no pixels — privacy), captured by the AI node at breach time.
+    # When staff verify the alert, this + their verdict become a labelled training
+    # row for the skeleton-anomaly model (copied to verified_cases). Null on manual
+    # uploads / older nodes.
+    pose_sequence: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)

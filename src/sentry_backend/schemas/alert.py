@@ -1,6 +1,7 @@
 """Alert schemas."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -97,6 +98,10 @@ class LiveAlertCreate(BaseModel):
     triggered_behaviors: list[str] | None = None
     triggered_sequences: list[str] | None = None
     triggered_behavior_detail: list[BehaviorDetailItem] | None = None
+    # Фаз 0 (ADR-0030): the breaching person's skeleton trajectory over the
+    # episode — training data for the skeleton-anomaly model, paired with the staff
+    # verdict later. Pose only, no pixels. Optional (older nodes don't send it).
+    pose_sequence: list[dict[str, Any]] | None = None
 
 
 class BreachClearedCreate(BaseModel):
