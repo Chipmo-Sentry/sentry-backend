@@ -117,3 +117,30 @@ def test_rev2_fields_default_for_old_ai_nodes() -> None:
     assert dumped["reasons"] == []
     assert dumped["episode_started_ms"] is None
     assert dumped["sequences"] == []
+
+
+# === held-item overlay: items must survive validation → browser fanout ===
+
+
+def test_items_pass_through_to_fanout() -> None:
+    """Held-item box + Mongolian name must reach the browser; extra="ignore"
+    would strip them without the LiveItem mirror."""
+    items = [
+        {
+            "box": [305.0, 300.0, 360.0, 330.0],
+            "label": "bottle",
+            "label_mn": "лонх",
+            "confidence": 0.81,
+            "held": True,
+        }
+    ]
+    frame = LiveFrame.model_validate(_frame(items=items))
+    dumped = frame.model_dump(mode="json")["items"][0]
+    assert dumped["box"] == [305.0, 300.0, 360.0, 330.0]
+    assert dumped["label_mn"] == "лонх"
+    assert dumped["held"] is True
+
+
+def test_items_default_empty_for_old_ai_nodes() -> None:
+    frame = LiveFrame.model_validate(_frame())
+    assert frame.model_dump(mode="json")["items"] == []

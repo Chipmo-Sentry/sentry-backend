@@ -306,6 +306,21 @@ class LiveTrack(BaseModel):
     store_risk_pct: float | None = None
 
 
+class LiveItem(BaseModel):
+    """A detected item for the live overlay (mirrors sentry-ai's ItemPayload).
+
+    extra="ignore" would strip these on the parse+re-dump in receive_live_metadata,
+    so they must be declared here to reach the browser's held-item box + name."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    box: tuple[float, float, float, float]
+    label: str = ""
+    label_mn: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    held: bool = False
+
+
 class LiveFrame(BaseModel):
     """Per-analyzed-frame metadata from the sentry-ai live worker
     (REV.1 — mirrors sentry-ai's FrameMetadata)."""
@@ -319,6 +334,8 @@ class LiveFrame(BaseModel):
     height: int = 0
     fps_inference: float = 0.0
     tracks: list[LiveTrack] = Field(default_factory=list)
+    # Detected merchandise this frame (held-item box + Mongolian name overlay).
+    items: list[LiveItem] = Field(default_factory=list)
 
 
 class LiveMetadataBatch(BaseModel):
