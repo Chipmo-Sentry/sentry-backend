@@ -64,11 +64,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         log.warning("bootstrap_superadmin_failed", exc_info=True)
     # T09: evidence-clip storage must be proven writable NOW, not at the first
     # upload — on Railway a missing Volume / CLIP_STORAGE_DIR means clips land
-    # on the ephemeral disk and die with the next deploy. Logs loudly, never
-    # blocks boot (live view etc. keep working while ops fixes the mount).
+    # on the ephemeral disk and die with the next deploy. In PRODUCTION this is
+    # fail-closed (mirrors CORS): silent evidence loss is the worst outcome for a
+    # loss-prevention product, so refuse to boot rather than run "successfully"
+    # while dropping every clip. Dev/staging just log and keep going.
     from sentry_backend.services.clip_service import ensure_clip_storage_writable
 
-    ensure_clip_storage_writable()
+    if not ensure_clip_storage_writable() and get_settings().environment == "production":
+        raise RuntimeError(
+            "clip_storage_dir is not writable in production — set a persistent "
+            "CLIP_STORAGE_DIR (Railway Volume). Refusing to boot to avoid silent "
+            "evidence loss."
+        )
     # T12: AI node offline watchdog — Telegram ping when a node stops
     # heartbeating (and when it recovers). Best-effort: never blocks boot.
     from sentry_backend.services.node_watchdog import NodeWatchdog

@@ -547,7 +547,8 @@ async def agent_edge_clip(
 
 @router.post("/agent/live-metadata", status_code=status.HTTP_202_ACCEPTED)
 async def agent_live_metadata(
-    _agent: Annotated[Agent, Depends(get_current_agent)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
     body: LiveMetadataBatch,
 ) -> dict[str, int]:
     """Edge Stage-1 live overlay feed (ADR-0029, edge-first). The agent's edge
@@ -558,10 +559,27 @@ async def agent_live_metadata(
     handler (which `/internal/live-metadata` runs) — so the EDGE alone, via
     `/agent/edge/clips` → VLM, decides alerts; this overlay path NEVER creates one.
     The agent JWT scopes trust to its store; `camera_id` is the mediamtx_path.
+
+    SECURITY: frames are filtered to mediamtx_paths owned by the agent's store, so
+    a paired agent can't inject overlay boxes onto another tenant's live view.
     """
+    owned_paths = set(
+        (
+            await db.execute(
+                select(Camera.mediamtx_path).where(
+                    Camera.store_id == agent.store_id,
+                    Camera.mediamtx_path.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     broker = get_live_broker()
     published = 0
     for frame in body.frames:
+        if frame.camera_id not in owned_paths:
+            continue  # not this store's camera — drop (cross-tenant injection)
         await broker.publish(frame.camera_id, frame.model_dump(mode="json"))
         published += 1
     return {"received": len(body.frames), "published": published}

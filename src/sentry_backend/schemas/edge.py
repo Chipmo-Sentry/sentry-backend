@@ -10,7 +10,7 @@ in sync). `version` lets the agent re-apply only when the config actually change
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class EdgeConfigPayload(BaseModel):
@@ -118,6 +118,64 @@ class EdgeConfigOverridesIn(BaseModel):
     max_clips: int | None = None
     max_age_sec: float | None = None
     upload_clips: bool | None = None
+
+    # SECURITY/safety: a global override applies to every store agent within a
+    # minute. Reject degenerate values (e.g. frame_skip=0, decay=0) that a cleared
+    # input coerces to, instead of fleet-applying them. Only non-None fields checked.
+    @model_validator(mode="after")
+    def _bounds(self) -> "EdgeConfigOverridesIn":
+        # field -> (min, max) inclusive; None side = unbounded
+        ranges: dict[str, tuple[float | None, float | None]] = {
+            "person_conf": (0.01, 1.0),
+            "item_conf": (0.01, 1.0),
+            "min_kp_conf": (0.0, 1.0),
+            "frame_skip": (1, 30),
+            "repeated_shelf_threshold": (1, 50),
+            "reach_frac": (0.0, 2.0),
+            "near_frac": (0.0, 2.0),
+            "iou_match": (0.0, 1.0),
+            "decay": (0.5, 1.0),
+            "open_risk": (1.0, 100.0),
+            "close_risk": (0.0, 100.0),
+            "band_yellow": (1.0, 100.0),
+            "band_red": (1.0, 100.0),
+            "max_clips": (1, 10000),
+        }
+        for field, (lo, hi) in ranges.items():
+            val = getattr(self, field)
+            if val is None:
+                continue
+            if (lo is not None and val < lo) or (hi is not None and val > hi):
+                raise ValueError(f"{field}={val} out of range [{lo}, {hi}]")
+        # weights, intervals, durations, seconds must be non-negative when set
+        for field in (
+            "w_holding",
+            "w_conceal",
+            "w_wrist_torso",
+            "w_exit_after_conceal",
+            "w_repeated_shelf",
+            "interval_holding",
+            "mindur_holding",
+            "interval_wrist_torso",
+            "mindur_wrist_torso",
+            "interval_conceal",
+            "mindur_conceal",
+            "interval_repeated_shelf",
+            "mindur_repeated_shelf",
+            "interval_exit_after_conceal",
+            "mindur_exit_after_conceal",
+            "post_quiet_sec",
+            "drop_after_sec",
+            "pre_sec",
+            "post_sec",
+            "segment_sec",
+            "keep_sec",
+            "max_age_sec",
+        ):
+            val = getattr(self, field)
+            if val is not None and val < 0:
+                raise ValueError(f"{field}={val} must be >= 0")
+        return self
 
 
 class EdgeConfigAdminView(BaseModel):
