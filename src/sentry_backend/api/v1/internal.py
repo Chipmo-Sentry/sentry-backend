@@ -28,6 +28,7 @@ from sentry_backend.security import decode_user_token
 from sentry_backend.services import alert_notify, event_log
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
+from sentry_backend.services.footfall_aggregator import get_footfall_aggregator
 from sentry_backend.services.live_broker import get_live_broker
 from sentry_backend.services.threshold_handler import (
     create_live_alert,
@@ -397,6 +398,7 @@ async def receive_live_metadata(
     """
     broker = get_live_broker()
     threshold_handler = get_threshold_handler()
+    footfall = get_footfall_aggregator()
     published = 0
     for frame in body.frames:
         # Downstream (WS fanout + threshold handler) consume the raw dict shape,
@@ -405,6 +407,9 @@ async def receive_live_metadata(
         frame_dict = frame.model_dump(mode="json")
         await broker.publish(frame.camera_id, frame_dict)
         await threshold_handler.on_frame(frame_dict)
+        # docs/30 F2: accumulate footfall for the /insights heatmap. Buffered +
+        # batch-flushed inside the aggregator, so this stays cheap on the hot path.
+        await footfall.on_frame(frame_dict)
         published += 1
     return {"received": len(body.frames), "published": published}
 

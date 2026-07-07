@@ -3,6 +3,10 @@
 from sentry_backend.db.models.agent import Agent, AgentPairingCode
 from sentry_backend.db.models.ai_node import AiNode, AiNodeMetric, AiNodePairingCode
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
+from sentry_backend.db.models.analytics_dwell import AnalyticsDwell
+from sentry_backend.db.models.analytics_flow import AnalyticsFlow
+from sentry_backend.db.models.analytics_footfall import AnalyticsFootfall
+from sentry_backend.db.models.analytics_visit import AnalyticsVisit
 from sentry_backend.db.models.app_config import AppConfig
 from sentry_backend.db.models.billing import (
     BillingJournal,
@@ -38,6 +42,10 @@ __all__ = [
     "Alert",
     "AlertCategory",
     "AlertLevel",
+    "AnalyticsDwell",
+    "AnalyticsFlow",
+    "AnalyticsFootfall",
+    "AnalyticsVisit",
     "AppConfig",
     "BillingJournal",
     "BillingProfile",

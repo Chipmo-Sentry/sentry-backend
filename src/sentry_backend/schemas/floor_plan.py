@@ -72,7 +72,7 @@ class FloorCamera(BaseModel):
     dir_deg: float = 0.0
     # 3×3 homography: PLAN → normalized-image (0-1). None until calibrated.
     # (This is what cv2.findHomography(plan, img) yields in _compute_calibration;
-    # invert it for image→plan, e.g. a coverage footprint.)
+    # consumers that need image→plan — e.g. the footfall aggregator — invert it.)
     homography: list[list[float]] | None = None
     reproj_err: float | None = None
     calib_points: list[CalibPoint] | None = Field(default=None, max_length=MAX_CALIB_POINTS)
