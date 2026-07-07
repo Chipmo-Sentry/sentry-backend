@@ -27,6 +27,7 @@ from sentry_backend.repository import (
     lead_repo,
     org_repo,
     store_repo,
+    telegram_config_repo,
     user_repo,
 )
 from sentry_backend.schemas.admin import (
@@ -35,6 +36,8 @@ from sentry_backend.schemas.admin import (
     OrgMemberPublic,
     StoreAdminRow,
     StoreAdminUpdate,
+    TelegramConfigUpdate,
+    TelegramConfigView,
     UserAdminUpdate,
     would_self_lockout,
 )
@@ -831,3 +834,29 @@ async def set_global_edge_config(
         updated_at=row.updated_at_db,
         effective=merged_edge_payload(version, ov),
     )
+
+
+@router.get("/telegram-config", response_model=TelegramConfigView)
+async def get_telegram_config(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> TelegramConfigView:
+    """Whether a platform Telegram bot token is set (+ a last-4 hint). The full
+    secret is never returned."""
+    configured, hint = await telegram_config_repo.get_status(db)
+    return TelegramConfigView(configured=configured, token_hint=hint)
+
+
+@router.put("/telegram-config", response_model=TelegramConfigView)
+async def set_telegram_config(
+    body: TelegramConfigUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+) -> TelegramConfigView:
+    """Set (non-empty) or clear (empty string) the platform Telegram bot token.
+    Encrypted at rest; wins over the env fallback. Per-store chat ids stay on
+    each store (frontend «Дэлгүүр засах»)."""
+    await telegram_config_repo.set_token(db, body.bot_token.strip() or None)
+    await db.commit()
+    configured, hint = await telegram_config_repo.get_status(db)
+    return TelegramConfigView(configured=configured, token_hint=hint)

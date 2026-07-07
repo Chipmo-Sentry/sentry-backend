@@ -19,6 +19,7 @@ from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
 from sentry_backend.db.models.clip import Clip
 from sentry_backend.db.models.store import Store
 from sentry_backend.logging_setup import get_logger
+from sentry_backend.repository import telegram_config_repo
 from sentry_backend.settings import get_settings
 
 log = get_logger("sentry_backend.alert_notify")
@@ -105,8 +106,12 @@ async def notify_alert(db: AsyncSession, alert: Alert) -> None:
     errors: a notification failure must never break alert creation."""
     if not is_actionable(alert.alert_level):
         return
+    # Token resolution: the superadmin-set DB value wins; the env var is a
+    # fallback so an existing env-based deploy keeps working (I2 / superadmin UI).
     settings = get_settings()
-    token = settings.telegram_bot_token
+    token = await telegram_config_repo.get_bot_token(db)
+    if not token and settings.telegram_bot_token:
+        token = settings.telegram_bot_token.get_secret_value()
     if not token:
         return
     chat_id = await _resolve_chat_id(db, alert)
@@ -114,7 +119,7 @@ async def notify_alert(db: AsyncSession, alert: Alert) -> None:
         log.info("alert_notify_no_chat", alert_id=str(alert.id))
         return
 
-    api = f"https://api.telegram.org/bot{token.get_secret_value()}"
+    api = f"https://api.telegram.org/bot{token}"
     text = _format(alert)
     clip_path = await _resolve_clip_path(db, alert)
     try:

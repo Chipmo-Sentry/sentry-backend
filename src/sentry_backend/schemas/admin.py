@@ -98,3 +98,19 @@ class AdminAlertRow(AlertPublic):
         if v.tzinfo is None:
             v = v.replace(tzinfo=UTC)
         return v.isoformat()
+
+
+class TelegramConfigView(BaseModel):
+    """Superadmin read view of the platform Telegram bot config. The full token
+    is NEVER returned — only whether one is set + a last-4 hint."""
+
+    configured: bool
+    token_hint: str | None = None
+
+
+class TelegramConfigUpdate(BaseModel):
+    """Set/clear the platform Telegram bot token. A non-empty ``bot_token`` sets
+    it; an empty string clears the integration. ``None`` is rejected (the field
+    must be present) so a save always has explicit intent."""
+
+    bot_token: str = Field(max_length=200)
