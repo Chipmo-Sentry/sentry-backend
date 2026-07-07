@@ -8,16 +8,25 @@ Chat resolution order: the alert's store `telegram_chat_id` → the global
 `TELEGRAM_ALERT_CHAT_ID` → none (skip). Reuses `TELEGRAM_BOT_TOKEN`.
 """
 
+import asyncio
+from pathlib import Path
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
+from sentry_backend.db.models.clip import Clip
 from sentry_backend.db.models.store import Store
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.settings import get_settings
 
 log = get_logger("sentry_backend.alert_notify")
+
+# Telegram bots may upload a video up to 50 MB via sendVideo. Our edge clips are
+# ~[-3s..+3s] (well under this), but guard anyway: an oversized clip falls back
+# to a text-only ping rather than a failed upload.
+_TELEGRAM_VIDEO_MAX_BYTES = 50 * 1024 * 1024
 
 _CATEGORY_LABEL: dict[AlertCategory, str] = {
     AlertCategory.browsing: "Хайж байгаа",
@@ -65,8 +74,35 @@ async def _resolve_chat_id(db: AsyncSession, alert: Alert) -> str | None:
     return settings.telegram_alert_chat_id
 
 
+def _probe_clip(storage_path: str | None) -> Path | None:
+    """Sync disk check (runs in a thread): the path exists and is small enough
+    to send as a Telegram video. None → caller sends text only."""
+    if not storage_path:
+        return None
+    path = Path(storage_path)
+    try:
+        if not path.is_file() or path.stat().st_size > _TELEGRAM_VIDEO_MAX_BYTES:
+            return None
+    except OSError:
+        return None
+    return path
+
+
+async def _resolve_clip_path(db: AsyncSession, alert: Alert) -> Path | None:
+    """The evidence-clip file for this alert, if present + small enough to send
+    as a video. The blocking disk stat is offloaded to a thread."""
+    if alert.clip_id is None:
+        return None
+    storage_path = (
+        await db.execute(select(Clip.storage_path).where(Clip.id == alert.clip_id))
+    ).scalar_one_or_none()
+    return await asyncio.to_thread(_probe_clip, storage_path)
+
+
 async def notify_alert(db: AsyncSession, alert: Alert) -> None:
-    """Fire-and-forget Telegram ping for an actionable alert. Swallows errors."""
+    """Fire-and-forget Telegram ping for an actionable alert — with the evidence
+    CLIP attached as a video when we have one, else a text-only message. Swallows
+    errors: a notification failure must never break alert creation."""
     if not is_actionable(alert.alert_level):
         return
     settings = get_settings()
@@ -77,13 +113,42 @@ async def notify_alert(db: AsyncSession, alert: Alert) -> None:
     if not chat_id:
         log.info("alert_notify_no_chat", alert_id=str(alert.id))
         return
+
+    api = f"https://api.telegram.org/bot{token.get_secret_value()}"
+    text = _format(alert)
+    clip_path = await _resolve_clip_path(db, alert)
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # 20s: a video upload takes longer than a text ping.
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            if clip_path is not None:
+                # sendVideo with the clip as multipart; the alert summary rides
+                # along as the caption so staff see the verdict + the footage in
+                # one message. A telegram-side failure falls through to text.
+                # Read the file in a thread — it's <=50 MB and the event loop
+                # must not block on disk.
+                video_bytes = await asyncio.to_thread(clip_path.read_bytes)
+                resp = await client.post(
+                    f"{api}/sendVideo",
+                    data={
+                        "chat_id": chat_id,
+                        "caption": text[:1024],  # Telegram caption cap
+                        "supports_streaming": "true",
+                    },
+                    files={"video": (clip_path.name, video_bytes, "video/mp4")},
+                )
+                if resp.is_success:
+                    return
+                log.warning(
+                    "alert_notify_video_failed",
+                    alert_id=str(alert.id),
+                    status=resp.status_code,
+                )
+            # No clip, or the video upload failed → text-only fallback.
             resp = await client.post(
-                f"https://api.telegram.org/bot{token.get_secret_value()}/sendMessage",
+                f"{api}/sendMessage",
                 json={
                     "chat_id": chat_id,
-                    "text": _format(alert),
+                    "text": text,
                     "disable_web_page_preview": True,
                 },
             )

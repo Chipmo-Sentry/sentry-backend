@@ -1,6 +1,12 @@
-"""Alert → Telegram notification — actionable gate + message formatting (no DB)."""
+"""Alert → Telegram notification — actionable gate + message formatting + the
+evidence-clip resolver that decides text-vs-video (no network)."""
 
 from __future__ import annotations
+
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
 
 from sentry_backend.db.models.alert import (
     Alert,
@@ -8,7 +14,12 @@ from sentry_backend.db.models.alert import (
     AlertLevel,
     AlertTrigger,
 )
-from sentry_backend.services.alert_notify import _format, is_actionable
+from sentry_backend.services.alert_notify import (
+    _TELEGRAM_VIDEO_MAX_BYTES,
+    _format,
+    _resolve_clip_path,
+    is_actionable,
+)
 
 
 def test_only_notify_and_review_are_actionable() -> None:
@@ -64,3 +75,44 @@ def test_edge_pc_upload_message_is_suspicion_not_breach() -> None:
     assert "Сэжигтэй үйлдэл" in msg
     assert "Шууд сэрэмжлүүлэг" not in msg
     assert "Хүн #" not in msg
+
+
+class _ScalarResult:
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    def scalar_one_or_none(self) -> object:
+        return self._value
+
+
+class _FakeDB:
+    """Minimal AsyncSession stub — execute() returns a fixed scalar (the clip's
+    storage_path) so the resolver can run without a real database."""
+
+    def __init__(self, storage_path: object) -> None:
+        self._storage_path = storage_path
+
+    async def execute(self, *_a: object, **_k: object) -> _ScalarResult:
+        return _ScalarResult(self._storage_path)
+
+
+@pytest.mark.asyncio
+async def test_resolve_clip_path_returns_existing_small_file(tmp_path: Path) -> None:
+    clip = tmp_path / "evidence.mp4"
+    clip.write_bytes(b"\x00" * 1024)
+    alert = _alert(clip_id=uuid4())
+    resolved = await _resolve_clip_path(_FakeDB(str(clip)), alert)  # type: ignore[arg-type]
+    assert resolved == clip
+
+
+@pytest.mark.asyncio
+async def test_resolve_clip_path_none_when_missing_or_oversized(tmp_path: Path) -> None:
+    alert = _alert(clip_id=uuid4())
+    # Path in DB but no file on disk → text-only fallback.
+    assert await _resolve_clip_path(_FakeDB(str(tmp_path / "gone.mp4")), alert) is None  # type: ignore[arg-type]
+    # DB has no storage_path row at all.
+    assert await _resolve_clip_path(_FakeDB(None), alert) is None  # type: ignore[arg-type]
+    # Oversized clip → skip the video, send text.
+    big = tmp_path / "big.mp4"
+    big.write_bytes(b"\x00" * (_TELEGRAM_VIDEO_MAX_BYTES + 1))
+    assert await _resolve_clip_path(_FakeDB(str(big)), alert) is None  # type: ignore[arg-type]
