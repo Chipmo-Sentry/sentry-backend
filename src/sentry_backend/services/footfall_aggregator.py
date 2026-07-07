@@ -101,16 +101,18 @@ def project_foot_to_plan(
 
     homography = cam.get("homography")
     if homography:
-        # H · [nx, ny, 1] → plan coords.
-        try:
-            (a, b, c0), (d, e, f), (g, h, i) = homography
-            w = g * foot_nx + h * foot_ny + i
-            if abs(w) < 1e-9:
-                return None
-            px = (a * foot_nx + b * foot_ny + c0) / w
-            py = (d * foot_nx + e * foot_ny + f) / w
-        except (TypeError, ValueError):
+        # The agent stores H as plan → normalized-image (cv2.findHomography(plan,
+        # img) in floor_plan_web._compute_calibration). We need the OPPOSITE here
+        # — a normalized-image foot point → plan — so apply the inverse.
+        inv = _invert_3x3(homography)
+        if inv is None:
             return None
+        (a, b, c0), (d, e, f), (g, h, i) = inv
+        w = g * foot_nx + h * foot_ny + i
+        if abs(w) < 1e-9:
+            return None
+        px = (a * foot_nx + b * foot_ny + c0) / w
+        py = (d * foot_nx + e * foot_ny + f) / w
     else:
         # Pre-calibration fallback: spread footfall in a blob around the camera's
         # placed position. Rough, but shows "activity near this camera" day one.
@@ -128,6 +130,28 @@ def project_foot_to_plan(
     px = min(sx - 1e-3, max(0.0, px))
     py = min(sy - 1e-3, max(0.0, py))
     return (px, py), (sx, sy)
+
+
+def _invert_3x3(m: Any) -> list[list[float]] | None:
+    """Inverse of a 3×3 matrix (nested lists), or None if singular/malformed.
+    Used to flip the stored plan→image homography into image→plan."""
+    try:
+        (a, b, c), (d, e, f), (g, h, i) = (
+            (float(m[0][0]), float(m[0][1]), float(m[0][2])),
+            (float(m[1][0]), float(m[1][1]), float(m[1][2])),
+            (float(m[2][0]), float(m[2][1]), float(m[2][2])),
+        )
+    except (TypeError, ValueError, IndexError):
+        return None
+    det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+    if abs(det) < 1e-12:
+        return None
+    inv_det = 1.0 / det
+    return [
+        [(e * i - f * h) * inv_det, (c * h - b * i) * inv_det, (b * f - c * e) * inv_det],
+        [(f * g - d * i) * inv_det, (a * i - c * g) * inv_det, (c * d - a * f) * inv_det],
+        [(d * h - e * g) * inv_det, (b * g - a * h) * inv_det, (a * e - b * d) * inv_det],
+    ]
 
 
 def _flow_adjacent(a: int, b: int) -> bool:
