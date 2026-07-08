@@ -36,6 +36,25 @@ async def list_members(db: AsyncSession, organization_id: UUID) -> list[tuple[Us
     return [(row[0], row[1]) for row in result.all()]
 
 
+async def list_all_memberships(
+    db: AsyncSession,
+) -> list[tuple[UUID, UUID, str, OrgRole]]:
+    """Return ``(user_id, org_id, org_name, role)`` for every membership across
+    all organizations in one JOIN — used by the superadmin Users table to show
+    each user's org role(s) without an N+1 per user."""
+    result = await db.execute(
+        select(
+            OrganizationMember.user_id,
+            Organization.id,
+            Organization.name,
+            OrganizationMember.role,
+        )
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
+        .order_by(Organization.name)
+    )
+    return [(row[0], row[1], row[2], row[3]) for row in result.all()]
+
+
 async def get_org(db: AsyncSession, org_id: UUID) -> Organization | None:
     result = await db.execute(select(Organization).where(Organization.id == org_id))
     return result.scalar_one_or_none()

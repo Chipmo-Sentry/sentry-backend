@@ -33,6 +33,24 @@ class OrgMemberPublic(BaseModel):
     role: OrgRole
 
 
+class UserMembershipRow(BaseModel):
+    """One org membership (name + role) for a user, shown in the superadmin
+    Users table so an org ``admin``/``owner``/``staff`` is no longer rendered as
+    an indistinct "Хэрэглэгч"."""
+
+    organization_id: str
+    organization_name: str
+    role: OrgRole
+
+
+class UserAdminRow(UserPublic):
+    """A user enriched with their org memberships for the superadmin Users list.
+    ``memberships`` is empty for a user who belongs to no organization (e.g. a
+    pure super-admin)."""
+
+    memberships: list[UserMembershipRow] = Field(default_factory=list)
+
+
 class UserAdminUpdate(BaseModel):
     """Partial update of a user's super-admin / active flags.
 

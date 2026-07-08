@@ -87,7 +87,8 @@ src/sentry_backend/
 │   ├── session.py          — async engine, AsyncSessionLocal, session_scope
 │   ├── base.py             — DeclarativeBase, UUIDPrimaryKeyMixin, TimestampMixin
 │   └── models/             — ORM, one file per entity (user, org, store, camera, clip, alert,
-│                             feedback, agent, ai_node, invitation, lead, rag_case, app_config)
+│                             feedback, agent, ai_node, invitation, lead, rag_case, app_config,
+│                             billing, edge_config, event_log)
 ├── schemas/                — Pydantic request/response models (the OpenAPI source of truth)
 ├── deps/                   — DI: get_db, get_current_user, tenancy, agent_auth, ai_node_auth, service
 ├── repository/             — CRUD layer (the only place that writes SQL)
@@ -96,7 +97,7 @@ src/sentry_backend/
 ├── api/v1/                 — versioned routers (see below)
 └── api/ws_live.py          — WebSocket /ws/live/{camera_id}
 
-alembic/versions/           — 13 migrations (initial schema → ai-node metrics → invitations → …)
+alembic/versions/           — 35 migrations (initial schema → ai-node metrics → invitations → …)
 scripts/                    — seed_dev.py, check_live_alerts.py
 tests/{unit,integration}/   — pytest suites
 ```
@@ -121,10 +122,16 @@ All routes are under `/api/v1`. Grouped by router:
 | **org_team** | owner/admin | `/org/members` · `/org/invitations` CRUD · `POST /org/accept-invite` · lock/unlock member |
 | **agents** | user + agent | admin: pairing codes, list, revoke · agent: `pair`, `/agent/cameras`, `/agent/stream-config`, `/agent/heartbeat` |
 | **ai_nodes** | ai-node | `POST /ai-nodes/pair` · `POST /ai-nodes/heartbeat` (telemetry in, config out) |
+| **nodes** | user | `GET /nodes` · `GET /nodes/agent-push` · `GET /nodes/{id}/metrics` · `GET /nodes/{id}/diag` (node_diag) |
 | **behaviors** | public read / super-admin write | `GET /behaviors` · PATCH weights+thresholds · add/edit/delete dimensions |
+| **billing** | user | `GET /billing` (summary) · `GET /billing/journal` · `POST /billing/promo` |
 | **admin** | super-admin | `/admin/stats` · `/admin/analytics/{alerts,feedback}` · orgs · users · leads · ai-nodes mgmt+metrics |
+| **admin_billing** | super-admin | `/admin/billing/overview` · per-org journal/top-up/credit · promo-code CRUD |
+| **events** | user + super-admin | `GET /events` · `GET /events/stream` (SSE) · `GET /admin/events` · `GET /admin/events/stream` |
 | **leads** | public | `POST /leads` (honeypot + rate-limited demo-request capture) |
-| **internal** | service / ai-node | `/internal/mediamtx-auth` · `/internal/alerts` · `/internal/live-metadata` · `/internal/rag/*` |
+| **ingest** | user | `GET /ingest/paths` (MediaMTX path status) |
+| **live** | user | `GET /live/{path}/hls/{filename}` (HLS proxy) |
+| **internal** | service / ai-node | `/internal/mediamtx-auth` · `/internal/alerts` · `/internal/live-alert` · `/internal/live-metadata` · `/internal/rag/*` |
 | **ws_live** | user | `WebSocket /ws/live/{camera_id}` (live overlay metadata) |
 | **health** | — | `GET /healthz` (DB ping + version) |
 
@@ -133,11 +140,13 @@ TypeScript types from it and fail CI on drift.
 
 ## Data model
 
-14 entities. Core surveillance chain: **User** ↔ **Organization** (via **OrganizationMember**) →
+23 entities. Core surveillance chain: **User** ↔ **Organization** (via **OrganizationMember**) →
 **Store** → **Camera** → **Clip** → **Alert** ← **Feedback**. Supporting entities: **Agent** +
 **AgentPairingCode** (PC relay onboarding), **AiNode** + **AiNodePairingCode** + **AiNodeMetric**
 (GPU box telemetry time-series), **Invitation** (org team invites), **Lead** (demo requests),
-**VerifiedCase** (RAG embeddings), **AppConfig** (KV store for the tunable behaviour catalog).
+**VerifiedCase** (RAG embeddings), **AppConfig** (KV store for the tunable behaviour catalog),
+**StoreEdgeConfig** (per-store Stage-1 edge tuning), **EventLog** (unified activity/audit timeline),
+and billing (**BillingProfile**, **BillingJournal**, **PromoCode**, **PromoRedemption**).
 Full ERD: [docs/09-DATA-MODEL.md](../docs/09-DATA-MODEL.md).
 
 ---
