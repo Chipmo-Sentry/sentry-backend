@@ -38,7 +38,9 @@ from sentry_backend.schemas.admin import (
     StoreAdminUpdate,
     TelegramConfigUpdate,
     TelegramConfigView,
+    UserAdminRow,
     UserAdminUpdate,
+    UserMembershipRow,
     would_self_lockout,
 )
 from sentry_backend.schemas.ai_node import (
@@ -525,13 +527,29 @@ async def list_org_members(
     ]
 
 
-@router.get("/users", response_model=list[UserPublic])
+@router.get("/users", response_model=list[UserAdminRow])
 async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(require_super_admin)],
-) -> list[UserPublic]:
+) -> list[UserAdminRow]:
     users = await user_repo.list_users(db)
-    return [UserPublic.model_validate(u) for u in users]
+    # One JOIN for every membership, then group by user (avoids an N+1 per user).
+    memberships: dict[UUID, list[UserMembershipRow]] = {}
+    for user_id, org_id, org_name, role in await org_repo.list_all_memberships(db):
+        memberships.setdefault(user_id, []).append(
+            UserMembershipRow(
+                organization_id=str(org_id),
+                organization_name=org_name,
+                role=role,
+            )
+        )
+    return [
+        UserAdminRow(
+            **UserPublic.model_validate(u).model_dump(),
+            memberships=memberships.get(u.id, []),
+        )
+        for u in users
+    ]
 
 
 @router.post(
