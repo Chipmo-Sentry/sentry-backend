@@ -53,6 +53,7 @@ from sentry_backend.services import ai_service, alert_notify, event_log, live_pr
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
 from sentry_backend.services.clip_service import ClipTooLargeError, save_upload_to_disk
+from sentry_backend.services.footfall_aggregator import get_footfall_aggregator
 from sentry_backend.services.live_broker import get_live_broker
 from sentry_backend.settings import get_settings
 
@@ -555,13 +556,18 @@ async def agent_live_metadata(
     engine POSTs per-frame tracks so the browser live overlay shows EDGE boxes
     when the node runs no live analysis.
 
-    Publishes to the WS live broker ONLY — deliberately NOT through the threshold
-    handler (which `/internal/live-metadata` runs) — so the EDGE alone, via
-    `/agent/edge/clips` → VLM, decides alerts; this overlay path NEVER creates one.
+    Publishes to the WS live broker and the footfall aggregator — deliberately
+    NOT through the threshold handler (which `/internal/live-metadata` runs) —
+    so the EDGE alone, via `/agent/edge/clips` → VLM, decides alerts; this path
+    NEVER creates one. The aggregator only accumulates /insights analytics
+    (heatmap/visits/dwell/flow/demographics), so edge_pc cameras finally count
+    toward the dashboard instead of being invisible to it.
     The agent JWT scopes trust to its store; `camera_id` is the mediamtx_path.
 
     SECURITY: frames are filtered to mediamtx_paths owned by the agent's store, so
     a paired agent can't inject overlay boxes onto another tenant's live view.
+    (The aggregator re-resolves the camera row itself, so it inherits the same
+    tenancy anchoring.)
     """
     owned_paths = set(
         (
@@ -576,11 +582,16 @@ async def agent_live_metadata(
         .all()
     )
     broker = get_live_broker()
+    footfall = get_footfall_aggregator()
     published = 0
     for frame in body.frames:
         if frame.camera_id not in owned_paths:
             continue  # not this store's camera — drop (cross-tenant injection)
-        await broker.publish(frame.camera_id, frame.model_dump(mode="json"))
+        frame_dict = frame.model_dump(mode="json")
+        await broker.publish(frame.camera_id, frame_dict)
+        # docs/30: edge-sourced frames feed /insights analytics too (buffered,
+        # never raises, never alerts).
+        await footfall.on_frame(frame_dict)
         published += 1
     return {"received": len(body.frames), "published": published}
 
