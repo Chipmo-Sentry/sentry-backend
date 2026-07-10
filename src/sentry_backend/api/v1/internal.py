@@ -306,6 +306,12 @@ class LiveTrack(BaseModel):
     # Cross-camera re-ID (ADR-0023)
     store_person_id: int | None = None
     store_risk_pct: float | None = None
+    # F5 demographics (docs/30) — optional classifier attributes. Lenient str
+    # (not Literal) so a node-side vocabulary tweak never 422s a whole batch;
+    # the footfall aggregator normalizes into its closed buckets. extra="ignore"
+    # strips undeclared keys, so they must be declared to reach the aggregator.
+    gender: str | None = Field(default=None, max_length=16)
+    age_band: str | None = Field(default=None, max_length=16)
 
 
 class LiveItem(BaseModel):

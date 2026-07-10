@@ -20,6 +20,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from sentry_backend.db.models.analytics_demographics import AGE_BANDS, GENDERS
 from sentry_backend.db.models.analytics_flow import FLOW_GRID
 from sentry_backend.db.models.analytics_footfall import GRID_SIZE
 from sentry_backend.db.models.camera import Camera
@@ -233,6 +234,19 @@ class _Presence:
         self.last_flow_cell: int | None = None
 
 
+def _demo_bucket(track: dict[str, Any]) -> tuple[str, str] | None:
+    """Normalize a track's optional classifier attributes into the closed
+    (gender, age_band) vocabulary, or None when the node sent neither — a
+    node without a demographics model contributes nothing (docs/30 F5)."""
+    raw_g = track.get("gender")
+    raw_a = track.get("age_band")
+    if not raw_g and not raw_a:
+        return None
+    gender = raw_g if raw_g in GENDERS else "unknown"
+    age_band = raw_a if raw_a in AGE_BANDS else "unknown"
+    return gender, age_band
+
+
 def _extract_gates(plan: dict[str, Any] | None) -> list[tuple[str, list[Any]]]:
     gates: list[tuple[str, list[Any]]] = []
     if not plan:
@@ -258,6 +272,11 @@ class FootfallAggregator:
         self._gate_last_prune = time.monotonic()
         # (camera_id, person_id) → active presence span (dwell-time, F3+).
         self._presence: dict[tuple[str, int], _Presence] = {}
+        # (camera_id, person_id) → last time counted for demographics (F5).
+        # Same dedup model as gates: one count per track per _GATE_TTL window.
+        self._demo_seen: dict[tuple[str, int], float] = {}
+        # (store_id, camera_id, hour, gender, age_band) → person count.
+        self._demo_buf: dict[tuple[UUID, str, datetime, str, str], int] = {}
         # (store_id, camera_id, hour) → [completed_track_count, dwell_ms_sum].
         self._dwell_buf: dict[tuple[UUID, str, datetime], list[int]] = {}
         # (store_id, camera_id, hour, from_cell, to_cell) → transition count.
@@ -323,10 +342,15 @@ class FootfallAggregator:
         present_pids: list[int] = []
         # (pid, coarse flow-cell index) for movement-edge counting.
         track_cells: list[tuple[int, int]] = []
+        # (pid, gender, age_band) for demographics counting (F5).
+        demo_hits: list[tuple[int, str, str]] = []
         for t in tracks:
             pid = t.get("person_id")
             if isinstance(pid, int):
                 present_pids.append(pid)
+                demo = _demo_bucket(t)
+                if demo is not None:
+                    demo_hits.append((pid, demo[0], demo[1]))
             foot = _foot_norm(t.get("box"), width, height)
             if foot is None:
                 continue
@@ -372,6 +396,15 @@ class FootfallAggregator:
                     self._presence[pk] = _Presence(now, resolved.store_id, hour)
                 else:
                     pres.last_mono = now
+            # Demographics: count each classified track once per TTL window
+            # (refresh last-seen while continuously visible, like gates).
+            for pid, gender, age_band in demo_hits:
+                dk = (cam_path, pid)
+                fresh = dk not in self._demo_seen
+                self._demo_seen[dk] = now
+                if fresh:
+                    mk = (resolved.store_id, cam_path, hour, gender, age_band)
+                    self._demo_buf[mk] = self._demo_buf.get(mk, 0) + 1
             # Movement flow: bump the edge when a track changes coarse cell.
             for pid, cell in track_cells:
                 pres = self._presence.get((cam_path, pid))
@@ -415,6 +448,10 @@ class FootfallAggregator:
         stale = [k for k, seen in self._gate_seen.items() if now - seen >= _GATE_TTL]
         for k in stale:
             del self._gate_seen[k]
+        # Same TTL model for demographics dedup — prune together.
+        demo_stale = [k for k, seen in self._demo_seen.items() if now - seen >= _GATE_TTL]
+        for k in demo_stale:
+            del self._demo_seen[k]
 
     async def flush(self) -> None:
         """Force a flush (e.g. on shutdown)."""
@@ -422,7 +459,13 @@ class FootfallAggregator:
             await self._flush_locked()
 
     async def _flush_locked(self) -> None:
-        if not self._buf and not self._visits and not self._dwell_buf and not self._flow_buf:
+        if (
+            not self._buf
+            and not self._visits
+            and not self._dwell_buf
+            and not self._flow_buf
+            and not self._demo_buf
+        ):
             self._last_flush = time.monotonic()
             return
         # Group buffered cells by store for a single upsert per store.
@@ -438,14 +481,19 @@ class FootfallAggregator:
         flow_by_store: dict[UUID, list[tuple[str, datetime, int, int, int]]] = {}
         for (store_id, camera_id, hour_ts, fc, tc), n in self._flow_buf.items():
             flow_by_store.setdefault(store_id, []).append((camera_id, hour_ts, fc, tc, n))
+        demo_by_store: dict[UUID, list[tuple[str, datetime, str, str, int]]] = {}
+        for (store_id, camera_id, hour_ts, gender, age_band), n in self._demo_buf.items():
+            demo_by_store.setdefault(store_id, []).append((camera_id, hour_ts, gender, age_band, n))
         buf_snapshot = self._buf
         visits_snapshot = self._visits
         dwell_snapshot = self._dwell_buf
         flow_snapshot = self._flow_buf
+        demo_snapshot = self._demo_buf
         self._buf = {}
         self._visits = {}
         self._dwell_buf = {}
         self._flow_buf = {}
+        self._demo_buf = {}
         self._last_flush = time.monotonic()
         try:
             async with session_scope() as db:
@@ -477,6 +525,13 @@ class FootfallAggregator:
                     await analytics_repo.bump_flow(
                         db, organization_id=org_id, store_id=store_id, edges=edges
                     )
+                for store_id, dcounts2 in demo_by_store.items():
+                    org_id = self._store_org.get(store_id)
+                    if org_id is None:
+                        continue
+                    await analytics_repo.bump_demographics(
+                        db, organization_id=org_id, store_id=store_id, counts=dcounts2
+                    )
                 await db.commit()
         except Exception:  # noqa: BLE001
             # Put the counts back so a transient DB blip doesn't lose data.
@@ -495,6 +550,8 @@ class FootfallAggregator:
                     b[1] += dms
             for ekey, n in flow_snapshot.items():
                 self._flow_buf[ekey] = self._flow_buf.get(ekey, 0) + n
+            for mkey, n in demo_snapshot.items():
+                self._demo_buf[mkey] = self._demo_buf.get(mkey, 0) + n
 
 
 def _hour_bucket(ts_ms: int) -> datetime:

@@ -8,6 +8,7 @@ from sentry_backend.db.models.analytics_flow import FLOW_GRID
 from sentry_backend.db.models.analytics_footfall import GRID_SIZE
 from sentry_backend.services.footfall_aggregator import (
     FootfallAggregator,
+    _demo_bucket,
     _extract_gates,
     _flow_adjacent,
     _foot_norm,
@@ -198,6 +199,44 @@ def test_flow_adjacent() -> None:
     assert _flow_adjacent(a, 7 * FLOW_GRID + 7) is True  # (7,7) — 2 steps diag
     assert _flow_adjacent(a, 5 * FLOW_GRID + 9) is False  # (9,5) — 4 steps
     assert _flow_adjacent(a, 9 * FLOW_GRID + 5) is False  # (5,9) — 4 steps
+
+
+def test_demo_bucket_normalizes() -> None:
+    # No attributes → None (node runs no classifier — contributes nothing).
+    assert _demo_bucket({"person_id": 1}) is None
+    assert _demo_bucket({"gender": None, "age_band": None}) is None
+    # Known vocabulary passes through.
+    assert _demo_bucket({"gender": "female", "age_band": "adult"}) == ("female", "adult")
+    # Out-of-vocabulary values fold to unknown instead of fanning out rows.
+    assert _demo_bucket({"gender": "woman", "age_band": "elderly"}) == ("unknown", "unknown")
+    # One-sided attributes still count (the other side is unknown).
+    assert _demo_bucket({"gender": "male"}) == ("male", "unknown")
+    assert _demo_bucket({"age_band": "child"}) == ("unknown", "child")
+
+
+def test_demo_seen_dedup_and_prune() -> None:
+    # One classified track must count ONCE while continuously visible, and the
+    # TTL prune must forget it so a later re-appearance recounts.
+    agg = FootfallAggregator()
+    sid = uuid4()
+    hour = datetime(2026, 7, 6, 13, tzinfo=UTC)
+    key = (sid, "cam", hour, "female", "adult")
+
+    def hit(now: float) -> None:
+        dk = ("cam", 7)
+        fresh = dk not in agg._demo_seen
+        agg._demo_seen[dk] = now
+        if fresh:
+            agg._demo_buf[key] = agg._demo_buf.get(key, 0) + 1
+
+    hit(100.0)
+    hit(101.0)  # same track next frame — deduped
+    assert agg._demo_buf[key] == 1
+    agg._gate_last_prune = 0.0
+    agg._prune_gate_seen(200.0)  # 99s absent ≥ TTL → forgotten
+    assert ("cam", 7) not in agg._demo_seen
+    hit(201.0)  # genuine re-appearance recounts
+    assert agg._demo_buf[key] == 2
 
 
 def test_hour_bucket_truncates() -> None:

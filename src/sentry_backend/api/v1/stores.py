@@ -17,6 +17,8 @@ from sentry_backend.deps.tenancy import (
 )
 from sentry_backend.repository import analytics_repo, store_repo
 from sentry_backend.schemas.analytics import (
+    DemographicSlice,
+    DemographicsSummary,
     FlowEdge,
     FlowSummary,
     FootfallGrid,
@@ -299,6 +301,47 @@ async def get_store_flow(
         window_to=end,
         max_count=max_count,
         edges=edges,
+    )
+
+
+# ── Demographics (docs/30 F5) — gender/age structure of classified visitors ──
+@router.get("/{store_id}/analytics/demographics", response_model=DemographicsSummary)
+async def get_store_demographics(
+    store_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    hours: Annotated[int, Query(ge=1, le=_MAX_HOURS)] = 24,
+) -> DemographicsSummary:
+    """Gender + age-band split of classified visitors over the last `hours`.
+    Counts come from optional per-track classifier attributes on the live
+    stream (LiveTrack.gender/age_band); a store whose node runs no
+    demographics model returns total=0."""
+    store = await store_repo.get_store(db, store_id, org_id)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+
+    end = datetime.now(UTC)
+    start = end - timedelta(hours=hours)
+    rows = await analytics_repo.demographics_for_store(db, store_id=store_id, start=start, end=end)
+    total = sum(n for _, _, n in rows)
+
+    def slices(idx: int) -> list[DemographicSlice]:
+        agg: dict[str, int] = {}
+        for row in rows:
+            key = str(row[idx])
+            agg[key] = agg.get(key, 0) + row[2]
+        return [
+            DemographicSlice(key=k, count=n, share=(n / total) if total else 0.0)
+            for k, n in sorted(agg.items(), key=lambda kv: kv[1], reverse=True)
+            if n > 0
+        ]
+
+    return DemographicsSummary(
+        window_from=start,
+        window_to=end,
+        total=total,
+        gender=slices(0),
+        age=slices(1),
     )
 
 

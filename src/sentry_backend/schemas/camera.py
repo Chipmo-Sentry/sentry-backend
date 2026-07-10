@@ -34,7 +34,10 @@ class Zone(BaseModel):
     stream size. Distinct from the deprecated single-bbox `shelf_zone_json`."""
 
     id: str | None = None
-    type: Literal["exit", "shelf", "checkout", "entrance"]
+    # `furniture` is tolerated for version-skew safety (an agent older than
+    # v0.7.88 derives EVERY plan fixture into zones — rejecting it would 422
+    # the whole calibration save). Engines ignore it (edge/zones _VALID_TYPES).
+    type: Literal["exit", "shelf", "checkout", "entrance", "furniture"]
     points: list[tuple[float, float]]
 
     @field_validator("points")
