@@ -27,7 +27,7 @@ from sentry_backend.schemas.analytics import (
     ZoneActivity,
     ZoneBreakdown,
 )
-from sentry_backend.schemas.floor_plan import FloorPlan
+from sentry_backend.schemas.floor_plan import DEFAULT_PLAN_SIZE, FloorPlan
 from sentry_backend.schemas.store import StoreCreate, StorePublic, StoreUpdate
 from sentry_backend.services.footfall_aggregator import point_in_polygon
 
@@ -146,7 +146,7 @@ async def get_store_footfall(
     start = end - timedelta(hours=hours)
     cells = await analytics_repo.grid_for_store(db, store_id=store_id, start=start, end=end)
 
-    size: tuple[float, float] = (1000.0, 800.0)
+    size: tuple[float, float] = DEFAULT_PLAN_SIZE
     if store.floor_plan and isinstance(store.floor_plan.get("size"), (list, tuple)):
         raw = store.floor_plan["size"]
         with contextlib.suppress(TypeError, ValueError, IndexError):
@@ -220,11 +220,11 @@ async def get_store_zones(
     cells = await analytics_repo.grid_for_store(db, store_id=store_id, start=start, end=end)
 
     plan = store.floor_plan or {}
-    size = plan.get("size") or [1000.0, 800.0]
+    size = plan.get("size") or list(DEFAULT_PLAN_SIZE)
     try:
         sx, sy = float(size[0]), float(size[1])
     except (TypeError, ValueError, IndexError):
-        sx, sy = 1000.0, 800.0
+        sx, sy = DEFAULT_PLAN_SIZE
     fixtures = plan.get("fixtures") or []
 
     # Precompute each cell's centre in plan coords once.
@@ -232,26 +232,34 @@ async def get_store_zones(
         ((gx + 0.5) / GRID_SIZE * sx, (gy + 0.5) / GRID_SIZE * sy, n) for gx, gy, n in cells
     ]
 
-    zone_samples: list[tuple[str, str, int]] = []
+    zone_samples: list[tuple[str, str, str | None, int]] = []
     for idx, f in enumerate(fixtures):
         pts = f.get("points")
         if not isinstance(pts, list) or len(pts) < 3:
             continue
         total = sum(n for cx, cy, n in cell_centres if point_in_polygon(cx, cy, pts))
         if total > 0:
+            raw_label = f.get("label")
+            label = str(raw_label) if raw_label else None
             zone_samples.append(
-                (str(f.get("id") or f"zone{idx}"), str(f.get("type") or "zone"), total)
+                (str(f.get("id") or f"zone{idx}"), str(f.get("type") or "zone"), label, total)
             )
 
-    zone_samples.sort(key=lambda z: z[2], reverse=True)
-    grand = sum(n for _, _, n in zone_samples)
+    zone_samples.sort(key=lambda z: z[3], reverse=True)
+    grand = sum(n for _, _, _, n in zone_samples)
     return ZoneBreakdown(
         window_from=start,
         window_to=end,
         total_samples=grand,
         zones=[
-            ZoneActivity(fixture_id=fid, type=ftype, samples=n, share=(n / grand) if grand else 0.0)
-            for fid, ftype, n in zone_samples
+            ZoneActivity(
+                fixture_id=fid,
+                type=ftype,
+                label=label,
+                samples=n,
+                share=(n / grand) if grand else 0.0,
+            )
+            for fid, ftype, label, n in zone_samples
         ],
     )
 

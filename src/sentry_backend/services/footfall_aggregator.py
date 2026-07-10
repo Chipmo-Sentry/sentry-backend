@@ -28,6 +28,7 @@ from sentry_backend.db.session import session_scope
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import analytics_repo
 from sentry_backend.repository.analytics_repo import BucketDelta
+from sentry_backend.schemas.floor_plan import DEFAULT_PLAN_SIZE
 
 log = get_logger(__name__)
 
@@ -83,7 +84,7 @@ def project_foot_to_plan(
     """
     if not plan:
         return None
-    size = plan.get("size") or [1000.0, 800.0]
+    size = plan.get("size") or list(DEFAULT_PLAN_SIZE)
     try:
         sx, sy = float(size[0]), float(size[1])
     except (TypeError, ValueError, IndexError):

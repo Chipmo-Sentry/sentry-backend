@@ -12,12 +12,18 @@ from pydantic import BaseModel, Field, field_validator
 
 FixtureType = Literal["shelf", "exit", "entrance", "checkout"]
 
+# Plan units are METRES: the agent editor (v0.7.66+) fixes 1 plan-unit == 1 m,
+# so `size` IS the store's real width × height. This default matches the
+# editor's DEFAULT_SIZE_M — keep the two in sync (assets/floorplan/app.js).
+DEFAULT_PLAN_SIZE: tuple[float, float] = (200.0, 200.0)
+
 # Defense-in-depth bounds (the agent is a semi-trusted client; cf. Camera.zones).
 MAX_WALLS = 256
 MAX_FIXTURES = 256
 MAX_CAMERAS = 128
 MAX_POLY_POINTS = 1024
 MAX_CALIB_POINTS = 64
+MAX_FIXTURE_LABEL = 64
 
 
 class FloorWall(BaseModel):
@@ -40,6 +46,9 @@ class FloorFixture(BaseModel):
 
     id: str | None = None
     type: FixtureType
+    # Optional operator-given name («Архины тавиур»…) — surfaces in /insights
+    # zone analytics instead of the generic type label.
+    label: str | None = Field(default=None, max_length=MAX_FIXTURE_LABEL)
     points: list[tuple[float, float]]
 
     @field_validator("points")
@@ -91,8 +100,8 @@ class FloorPlan(BaseModel):
     """The full per-store plan. Empty default = nothing drawn yet."""
 
     version: int = 1
-    # Plan canvas logical size (relative units; no real-world scale required).
-    size: tuple[float, float] = (1000.0, 800.0)
+    # Plan canvas size in METRES (1 unit == 1 m — see DEFAULT_PLAN_SIZE).
+    size: tuple[float, float] = DEFAULT_PLAN_SIZE
     walls: list[FloorWall] = Field(default_factory=list, max_length=MAX_WALLS)
     fixtures: list[FloorFixture] = Field(default_factory=list, max_length=MAX_FIXTURES)
     cameras: list[FloorCamera] = Field(default_factory=list, max_length=MAX_CAMERAS)

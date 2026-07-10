@@ -48,6 +48,9 @@ class ZoneActivity(BaseModel):
 
     fixture_id: str
     type: str  # shelf | checkout | exit | entrance
+    # Operator-given fixture name from the plan editor (falls back to the type
+    # label in the UI when absent).
+    label: str | None = None
     samples: int
     share: float  # 0-1 fraction of the store's total in-zone activity
 

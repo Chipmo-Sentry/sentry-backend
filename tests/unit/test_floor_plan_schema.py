@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from sentry_backend.schemas.floor_plan import (
+    DEFAULT_PLAN_SIZE,
     MAX_CAMERAS,
     MAX_FIXTURES,
     FloorPlan,
@@ -19,7 +20,16 @@ def test_empty_plan_defaults() -> None:
     p = FloorPlan()
     assert p.version == 1
     assert p.walls == [] and p.fixtures == [] and p.cameras == []
-    assert p.size == (1000.0, 800.0)
+    # Metres — must match the agent editor's DEFAULT_SIZE_M (1 unit == 1 m).
+    assert p.size == DEFAULT_PLAN_SIZE == (200.0, 200.0)
+
+
+def test_fixture_label_round_trips() -> None:
+    p = FloorPlan(fixtures=[{"type": "shelf", "label": "Архины тавиур", "points": _TRI}])
+    back = FloorPlan.model_validate(p.model_dump(mode="json"))
+    assert back.fixtures[0].label == "Архины тавиур"
+    # Absent label stays None (legacy plans without the field).
+    assert FloorPlan(fixtures=[{"type": "shelf", "points": _TRI}]).fixtures[0].label is None
 
 
 def test_full_plan_validates() -> None:
