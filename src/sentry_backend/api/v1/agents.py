@@ -45,13 +45,15 @@ from sentry_backend.schemas.agent import (
     PairingCodePublic,
 )
 from sentry_backend.schemas.alert import AlertPublic
-from sentry_backend.schemas.camera import CameraPublic
+from sentry_backend.schemas.camera import CameraPublic, StreamTokenResponse
 from sentry_backend.schemas.edge import EdgeConfigPayload, merged_edge_payload
 from sentry_backend.schemas.floor_plan import FloorPlan
-from sentry_backend.security import create_agent_token
+from sentry_backend.security import create_agent_token, create_stream_token
 from sentry_backend.services import ai_service, alert_notify, event_log, live_provision
 from sentry_backend.services.alert_broker import get_broker
 from sentry_backend.services.alert_service import derive_alert_level
+from sentry_backend.services.billing.gating import SUSPENDED_DETAIL, org_billing_status
+from sentry_backend.services.billing.status import BillingStatus
 from sentry_backend.services.clip_service import ClipTooLargeError, save_upload_to_disk
 from sentry_backend.services.footfall_aggregator import get_footfall_aggregator
 from sentry_backend.services.live_broker import get_live_broker
@@ -330,6 +332,43 @@ async def agent_update_camera(
                 zones=cam.zones,
             )
     return CameraPublic.from_orm_camera(cam)
+
+
+@router.get("/agent/cameras/{camera_id}/stream-token", response_model=StreamTokenResponse)
+async def agent_camera_stream_token(
+    camera_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    agent: Annotated[Agent, Depends(get_current_agent)],
+) -> StreamTokenResponse:
+    """Mint a short-lived HLS read token for a camera in the agent's store.
+
+    The floor-plan editor's calibration needs ONE still frame. When the editor
+    runs on a machine that can't reach the camera's LAN (the camera was
+    registered from another PC, or the operator is off-site), the agent grabs
+    the frame from the cloud HLS instead — this token authorizes that read,
+    confined to the camera's mediamtx_path, exactly like the user-minted one.
+    """
+    # T14 gating: same rule as the user stream-token — a suspended org can't
+    # stream video, through either audience.
+    if await org_billing_status(db, agent.organization_id) is BillingStatus.suspended:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=SUSPENDED_DETAIL,
+        )
+    cam = await camera_repo.get_camera_for_org(db, camera_id, agent.organization_id)
+    if cam is None or cam.store_id != agent.store_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Камер олдсонгүй.")
+    if not cam.mediamtx_path:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Энэ камерт шууд дамжуулалтын зам тохируулаагүй байна.",
+        )
+    token = create_stream_token(cam.mediamtx_path)
+    return StreamTokenResponse(
+        token=token,
+        expires_in=get_settings().stream_token_ttl_sec,
+        hls_url=f"/api/v1/live/{cam.mediamtx_path}/hls/index.m3u8?jwt={token}",
+    )
 
 
 @router.delete("/agent/cameras/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
