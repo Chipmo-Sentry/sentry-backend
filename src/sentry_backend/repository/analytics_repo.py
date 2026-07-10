@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.analytics_demographics import AnalyticsDemographics
 from sentry_backend.db.models.analytics_dwell import AnalyticsDwell
 from sentry_backend.db.models.analytics_flow import AnalyticsFlow
 from sentry_backend.db.models.analytics_footfall import AnalyticsFootfall
@@ -131,6 +132,61 @@ async def bump_visits(
         set_={"entries": AnalyticsVisit.entries + stmt.excluded.entries},
     )
     await db.execute(stmt)
+
+
+async def bump_demographics(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    store_id: UUID,
+    counts: list[tuple[str, datetime, str, str, int]],
+) -> None:
+    """Upsert-increment hourly demographics counts (docs/30 F5). Each tuple is
+    (camera_id, hour, gender, age_band, n)."""
+    if not counts:
+        return
+    rows = [
+        {
+            "organization_id": organization_id,
+            "store_id": store_id,
+            "camera_id": camera_id,
+            "hour_ts": hour_ts,
+            "gender": gender,
+            "age_band": age_band,
+            "count": n,
+        }
+        for camera_id, hour_ts, gender, age_band, n in counts
+    ]
+    stmt = pg_insert(AnalyticsDemographics).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_demographics_bucket",
+        set_={"count": AnalyticsDemographics.count + stmt.excluded.count},
+    )
+    await db.execute(stmt)
+
+
+async def demographics_for_store(
+    db: AsyncSession,
+    *,
+    store_id: UUID,
+    start: datetime,
+    end: datetime,
+) -> list[tuple[str, str, int]]:
+    """Sum the window into (gender, age_band, count) slices for one store."""
+    result = await db.execute(
+        select(
+            AnalyticsDemographics.gender,
+            AnalyticsDemographics.age_band,
+            func.sum(AnalyticsDemographics.count).label("n"),
+        )
+        .where(
+            AnalyticsDemographics.store_id == store_id,
+            AnalyticsDemographics.hour_ts >= start,
+            AnalyticsDemographics.hour_ts < end,
+        )
+        .group_by(AnalyticsDemographics.gender, AnalyticsDemographics.age_band)
+    )
+    return [(g, a, int(n)) for g, a, n in result.all()]
 
 
 async def visits_hourly_for_store(

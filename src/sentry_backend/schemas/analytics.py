@@ -47,7 +47,10 @@ class ZoneActivity(BaseModel):
     """Footfall activity attributed to one plan fixture/zone (docs/30 F4)."""
 
     fixture_id: str
-    type: str  # shelf | checkout | exit | entrance
+    type: str  # shelf | checkout | exit | entrance | furniture
+    # Operator-given fixture name from the plan editor (falls back to the type
+    # label in the UI when absent).
+    label: str | None = None
     samples: int
     share: float  # 0-1 fraction of the store's total in-zone activity
 
@@ -80,6 +83,28 @@ class FlowSummary(BaseModel):
     window_to: datetime
     max_count: int
     edges: list[FlowEdge] = Field(default_factory=list)
+
+
+class DemographicSlice(BaseModel):
+    """One demographic bucket's share of the window (docs/30 F5)."""
+
+    key: str  # gender: male|female|unknown; age: child|youth|adult|senior|unknown
+    count: int
+    share: float  # 0-1 fraction of classified visitors in the window
+
+
+class DemographicsSummary(BaseModel):
+    """Gender/age structure of classified visitors over a window (docs/30 F5).
+
+    `total` counts CLASSIFIED tracks only — a store whose AI node runs no
+    demographics model reports 0 and the frontend shows its own empty state.
+    Slices are sorted by count, zero buckets omitted."""
+
+    window_from: datetime
+    window_to: datetime
+    total: int
+    gender: list[DemographicSlice] = Field(default_factory=list)
+    age: list[DemographicSlice] = Field(default_factory=list)
 
 
 class PeakCell(BaseModel):

@@ -1,9 +1,10 @@
 """POST /api/v1/agent/live-metadata — edge overlay feed.
 
-Proves it publishes each frame to the live WS broker, filters frames to the
-agent store's OWNED camera paths (no cross-tenant overlay injection), and does
-NOT run the threshold handler. DB is a fake returning the store's owned paths;
-the broker is a fake capturing publishes."""
+Proves it publishes each frame to the live WS broker AND the footfall
+aggregator (edge cameras count toward /insights analytics), filters frames to
+the agent store's OWNED camera paths (no cross-tenant overlay injection), and
+does NOT run the threshold handler. DB is a fake returning the store's owned
+paths; the broker + aggregator are fakes capturing calls."""
 
 from __future__ import annotations
 
@@ -57,11 +58,26 @@ class _FakeBroker:
         self.published.append((key, payload))
 
 
+class _FakeAggregator:
+    def __init__(self) -> None:
+        self.frames: list[dict] = []
+
+    async def on_frame(self, frame: dict) -> None:
+        self.frames.append(frame)
+
+
 @pytest.fixture
 def broker(monkeypatch: pytest.MonkeyPatch) -> _FakeBroker:
     b = _FakeBroker()
     monkeypatch.setattr(agents_mod, "get_live_broker", lambda: b)
     return b
+
+
+@pytest.fixture
+def aggregator(monkeypatch: pytest.MonkeyPatch) -> _FakeAggregator:
+    a = _FakeAggregator()
+    monkeypatch.setattr(agents_mod, "get_footfall_aggregator", lambda: a)
+    return a
 
 
 @pytest.fixture
@@ -85,7 +101,9 @@ def _frame(camera_id: str) -> dict:
     }
 
 
-def test_publishes_owned_frame_to_broker(client: TestClient, broker: _FakeBroker) -> None:
+def test_publishes_owned_frame_to_broker(
+    client: TestClient, broker: _FakeBroker, aggregator: _FakeAggregator
+) -> None:
     r = client.post("/api/v1/agent/live-metadata", json={"frames": [_frame("192_168_1_64")]})
     assert r.status_code == 202
     assert r.json() == {"received": 1, "published": 1}
@@ -93,19 +111,28 @@ def test_publishes_owned_frame_to_broker(client: TestClient, broker: _FakeBroker
     key, payload = broker.published[0]
     assert key == "192_168_1_64"
     assert payload["tracks"][0]["person_id"] == 7
+    # Edge frames feed /insights analytics too (heatmap/visits/demographics).
+    assert len(aggregator.frames) == 1
+    assert aggregator.frames[0]["camera_id"] == "192_168_1_64"
 
 
-def test_drops_frame_for_unowned_camera(client: TestClient, broker: _FakeBroker) -> None:
+def test_drops_frame_for_unowned_camera(
+    client: TestClient, broker: _FakeBroker, aggregator: _FakeAggregator
+) -> None:
     # A path the agent's store does NOT own → dropped, never published (no
-    # cross-tenant overlay injection).
+    # cross-tenant overlay injection) — and never counted in analytics either.
     r = client.post("/api/v1/agent/live-metadata", json={"frames": [_frame("10_0_0_9")]})
     assert r.status_code == 202
     assert r.json() == {"received": 1, "published": 0}
     assert broker.published == []
+    assert aggregator.frames == []
 
 
-def test_empty_frames_rejected(client: TestClient, broker: _FakeBroker) -> None:
+def test_empty_frames_rejected(
+    client: TestClient, broker: _FakeBroker, aggregator: _FakeAggregator
+) -> None:
     # LiveMetadataBatch requires >=1 frame.
     r = client.post("/api/v1/agent/live-metadata", json={"frames": []})
     assert r.status_code == 422
     assert broker.published == []
+    assert aggregator.frames == []

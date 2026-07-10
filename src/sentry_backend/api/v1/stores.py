@@ -17,6 +17,8 @@ from sentry_backend.deps.tenancy import (
 )
 from sentry_backend.repository import analytics_repo, store_repo
 from sentry_backend.schemas.analytics import (
+    DemographicSlice,
+    DemographicsSummary,
     FlowEdge,
     FlowSummary,
     FootfallGrid,
@@ -27,7 +29,7 @@ from sentry_backend.schemas.analytics import (
     ZoneActivity,
     ZoneBreakdown,
 )
-from sentry_backend.schemas.floor_plan import FloorPlan
+from sentry_backend.schemas.floor_plan import DEFAULT_PLAN_SIZE, FloorPlan
 from sentry_backend.schemas.store import StoreCreate, StorePublic, StoreUpdate
 from sentry_backend.services.footfall_aggregator import point_in_polygon
 
@@ -146,7 +148,7 @@ async def get_store_footfall(
     start = end - timedelta(hours=hours)
     cells = await analytics_repo.grid_for_store(db, store_id=store_id, start=start, end=end)
 
-    size: tuple[float, float] = (1000.0, 800.0)
+    size: tuple[float, float] = DEFAULT_PLAN_SIZE
     if store.floor_plan and isinstance(store.floor_plan.get("size"), (list, tuple)):
         raw = store.floor_plan["size"]
         with contextlib.suppress(TypeError, ValueError, IndexError):
@@ -220,11 +222,11 @@ async def get_store_zones(
     cells = await analytics_repo.grid_for_store(db, store_id=store_id, start=start, end=end)
 
     plan = store.floor_plan or {}
-    size = plan.get("size") or [1000.0, 800.0]
+    size = plan.get("size") or list(DEFAULT_PLAN_SIZE)
     try:
         sx, sy = float(size[0]), float(size[1])
     except (TypeError, ValueError, IndexError):
-        sx, sy = 1000.0, 800.0
+        sx, sy = DEFAULT_PLAN_SIZE
     fixtures = plan.get("fixtures") or []
 
     # Precompute each cell's centre in plan coords once.
@@ -232,26 +234,34 @@ async def get_store_zones(
         ((gx + 0.5) / GRID_SIZE * sx, (gy + 0.5) / GRID_SIZE * sy, n) for gx, gy, n in cells
     ]
 
-    zone_samples: list[tuple[str, str, int]] = []
+    zone_samples: list[tuple[str, str, str | None, int]] = []
     for idx, f in enumerate(fixtures):
         pts = f.get("points")
         if not isinstance(pts, list) or len(pts) < 3:
             continue
         total = sum(n for cx, cy, n in cell_centres if point_in_polygon(cx, cy, pts))
         if total > 0:
+            raw_label = f.get("label")
+            label = str(raw_label) if raw_label else None
             zone_samples.append(
-                (str(f.get("id") or f"zone{idx}"), str(f.get("type") or "zone"), total)
+                (str(f.get("id") or f"zone{idx}"), str(f.get("type") or "zone"), label, total)
             )
 
-    zone_samples.sort(key=lambda z: z[2], reverse=True)
-    grand = sum(n for _, _, n in zone_samples)
+    zone_samples.sort(key=lambda z: z[3], reverse=True)
+    grand = sum(n for _, _, _, n in zone_samples)
     return ZoneBreakdown(
         window_from=start,
         window_to=end,
         total_samples=grand,
         zones=[
-            ZoneActivity(fixture_id=fid, type=ftype, samples=n, share=(n / grand) if grand else 0.0)
-            for fid, ftype, n in zone_samples
+            ZoneActivity(
+                fixture_id=fid,
+                type=ftype,
+                label=label,
+                samples=n,
+                share=(n / grand) if grand else 0.0,
+            )
+            for fid, ftype, label, n in zone_samples
         ],
     )
 
@@ -291,6 +301,47 @@ async def get_store_flow(
         window_to=end,
         max_count=max_count,
         edges=edges,
+    )
+
+
+# ── Demographics (docs/30 F5) — gender/age structure of classified visitors ──
+@router.get("/{store_id}/analytics/demographics", response_model=DemographicsSummary)
+async def get_store_demographics(
+    store_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    hours: Annotated[int, Query(ge=1, le=_MAX_HOURS)] = 24,
+) -> DemographicsSummary:
+    """Gender + age-band split of classified visitors over the last `hours`.
+    Counts come from optional per-track classifier attributes on the live
+    stream (LiveTrack.gender/age_band); a store whose node runs no
+    demographics model returns total=0."""
+    store = await store_repo.get_store(db, store_id, org_id)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+
+    end = datetime.now(UTC)
+    start = end - timedelta(hours=hours)
+    rows = await analytics_repo.demographics_for_store(db, store_id=store_id, start=start, end=end)
+    total = sum(n for _, _, n in rows)
+
+    def slices(idx: int) -> list[DemographicSlice]:
+        agg: dict[str, int] = {}
+        for row in rows:
+            key = str(row[idx])
+            agg[key] = agg.get(key, 0) + row[2]
+        return [
+            DemographicSlice(key=k, count=n, share=(n / total) if total else 0.0)
+            for k, n in sorted(agg.items(), key=lambda kv: kv[1], reverse=True)
+            if n > 0
+        ]
+
+    return DemographicsSummary(
+        window_from=start,
+        window_to=end,
+        total=total,
+        gender=slices(0),
+        age=slices(1),
     )
 
 

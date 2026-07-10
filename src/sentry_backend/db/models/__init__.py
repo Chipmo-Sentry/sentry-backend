@@ -3,6 +3,7 @@
 from sentry_backend.db.models.agent import Agent, AgentPairingCode
 from sentry_backend.db.models.ai_node import AiNode, AiNodeMetric, AiNodePairingCode
 from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
+from sentry_backend.db.models.analytics_demographics import AnalyticsDemographics
 from sentry_backend.db.models.analytics_dwell import AnalyticsDwell
 from sentry_backend.db.models.analytics_flow import AnalyticsFlow
 from sentry_backend.db.models.analytics_footfall import AnalyticsFootfall
@@ -42,6 +43,7 @@ __all__ = [
     "Alert",
     "AlertCategory",
     "AlertLevel",
+    "AnalyticsDemographics",
     "AnalyticsDwell",
     "AnalyticsFlow",
     "AnalyticsFootfall",
