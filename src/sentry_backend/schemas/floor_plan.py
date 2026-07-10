@@ -10,12 +10,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-FixtureType = Literal["shelf", "exit", "entrance", "checkout"]
+# `furniture` is scenery (буйдан/сандал/ширээ): drawable + shown in analytics,
+# but the agent editor does NOT derive Camera.zones from it (no engine meaning).
+FixtureType = Literal["shelf", "exit", "entrance", "checkout", "furniture"]
 
 # Plan units are METRES: the agent editor (v0.7.66+) fixes 1 plan-unit == 1 m,
-# so `size` IS the store's real width × height. This default matches the
-# editor's DEFAULT_SIZE_M — keep the two in sync (assets/floorplan/app.js).
-DEFAULT_PLAN_SIZE: tuple[float, float] = (200.0, 200.0)
+# so `size` IS the store's real width × height. A typical retail store is
+# ~10×10 m, so the default canvas is 20×20 (a 200×200 default made real stores
+# render tiny). This matches the editor's DEFAULT_SIZE_M — keep the two in
+# sync (assets/floorplan/app.js).
+DEFAULT_PLAN_SIZE: tuple[float, float] = (20.0, 20.0)
 
 # Defense-in-depth bounds (the agent is a semi-trusted client; cf. Camera.zones).
 MAX_WALLS = 256

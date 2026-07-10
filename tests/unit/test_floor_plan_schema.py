@@ -21,7 +21,13 @@ def test_empty_plan_defaults() -> None:
     assert p.version == 1
     assert p.walls == [] and p.fixtures == [] and p.cameras == []
     # Metres — must match the agent editor's DEFAULT_SIZE_M (1 unit == 1 m).
-    assert p.size == DEFAULT_PLAN_SIZE == (200.0, 200.0)
+    assert p.size == DEFAULT_PLAN_SIZE == (20.0, 20.0)
+
+
+def test_furniture_fixture_type_accepted() -> None:
+    # Scenery type (буйдан/сандал): drawable + analytics, no zone derivation.
+    p = FloorPlan(fixtures=[{"type": "furniture", "points": _TRI}])
+    assert p.fixtures[0].type == "furniture"
 
 
 def test_fixture_label_round_trips() -> None:
