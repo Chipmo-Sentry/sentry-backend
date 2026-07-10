@@ -12,7 +12,9 @@ from pydantic import BaseModel, Field, field_validator
 
 # `furniture` is scenery (буйдан/сандал/ширээ): drawable + shown in analytics,
 # but the agent editor does NOT derive Camera.zones from it (no engine meaning).
-FixtureType = Literal["shelf", "exit", "entrance", "checkout", "furniture"]
+# `fridge` is an item-taking area like `shelf` — it derives zones and feeds the
+# repeated-visit behaviour.
+FixtureType = Literal["shelf", "exit", "entrance", "checkout", "furniture", "fridge"]
 
 # Plan units are METRES: the agent editor (v0.7.66+) fixes 1 plan-unit == 1 m,
 # so `size` IS the store's real width × height. A typical retail store is

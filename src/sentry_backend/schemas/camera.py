@@ -37,7 +37,7 @@ class Zone(BaseModel):
     # `furniture` is tolerated for version-skew safety (an agent older than
     # v0.7.88 derives EVERY plan fixture into zones — rejecting it would 422
     # the whole calibration save). Engines ignore it (edge/zones _VALID_TYPES).
-    type: Literal["exit", "shelf", "checkout", "entrance", "furniture"]
+    type: Literal["exit", "shelf", "checkout", "entrance", "furniture", "fridge"]
     points: list[tuple[float, float]]
 
     @field_validator("points")
