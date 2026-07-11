@@ -28,6 +28,7 @@ from sentry_backend.deps.db import get_db
 from sentry_backend.logging_setup import get_logger
 from sentry_backend.repository import ai_node_repo
 from sentry_backend.schemas.ai_node import (
+    NODE_ONLINE_WINDOW,
     parse_camera_health,
     parse_hls_base,
     parse_served_paths,
@@ -56,17 +57,43 @@ def _token_ok(token: str, path: str) -> bool:
     return payload.get("typ") == "stream" and payload.get("path") == path
 
 
+def _node_online(node: object) -> bool:
+    """A node whose last heartbeat is within the online window. A dead node's
+    STALE telemetry (old address, old served paths) must never win the match —
+    that's how an offline predecessor kept the live HLS pinned to its old HTTP
+    address after a node migration."""
+    ls = getattr(node, "last_seen_at", None)
+    if ls is None:
+        return False
+    if ls.tzinfo is None:
+        ls = ls.replace(tzinfo=UTC)
+    return bool(datetime.now(UTC) - ls < NODE_ONLINE_WINDOW)
+
+
 async def _node_hls_base(db: AsyncSession, path: str) -> str | None:
     """The HLS base of the AI node currently serving `path` (matched via the same
-    telemetry.cameras[].camera_id link the pipeline view uses)."""
+    telemetry.cameras[].camera_id link the pipeline view uses).
+
+    Only ONLINE nodes are considered, and an HTTPS base (redirectable straight to
+    the node's own tunnel) is preferred over an HTTP one (which we must proxy) —
+    so a lingering offline/HTTP record can't shadow the live node's tunnel."""
+    http_fallback: str | None = None
     for node in await ai_node_repo.list_nodes(db):
+        if not _node_online(node):
+            continue
         cams = parse_camera_health(node.telemetry) or []
         # Match the analysis worker's cameras (cloud topology) OR the node's served
         # MediaMTX paths (edge topology: the node relays but doesn't analyse).
         served = parse_served_paths(node.telemetry)
-        if any(c.camera_id == path for c in cams) or path in served:
-            return parse_hls_base(node.telemetry)
-    return None
+        if not (any(c.camera_id == path for c in cams) or path in served):
+            continue
+        base = parse_hls_base(node.telemetry)
+        if not base:
+            continue
+        if base.startswith("https://"):
+            return base  # redirectable — the best case, take it immediately
+        http_fallback = http_fallback or base
+    return http_fallback
 
 
 # The agent's reported tunnel base is only valid while it's heart-beating (the
