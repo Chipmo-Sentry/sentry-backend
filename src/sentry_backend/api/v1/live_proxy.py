@@ -140,14 +140,21 @@ async def hls_proxy(
     # on the node but shows "unsupported codec" through the tunnel. So the node is
     # the correct primary whenever it serves the path; the agent tunnel is the
     # fallback for edge/no-node stores.
-    #
-    # The node serves HTTP, so we MUST proxy (can't redirect an HTTPS page to
-    # mixed content). MediaMTX's low-latency HLS binds `?session` to the client IP;
-    # proxying is only safe because the backend runs a SINGLE web worker (one egress
-    # IP for master + sub + segments). If WEB_CONCURRENCY is ever raised, give the
-    # node its own HTTPS tunnel and redirect to it instead (as we do for the agent).
     base = await _node_hls_base(db, path)
-    if not base:
+    if base:
+        # A node with an HTTPS base has its own tunnel — REDIRECT the browser
+        # straight to it (like the agent tunnel). This is the correct path: a
+        # direct browser→MediaMTX connection keeps low-latency HLS's IP-bound
+        # `?session` consistent (chunked master/sub/segments all from one client),
+        # whereas proxying live LL-HLS through the backend churns sessions and
+        # stalls the player after ~1s. It also keeps the video off the backend
+        # (no egress cost, no single-worker bottleneck). The node's HTTP base is
+        # still proxied below — that's LAN/dev where the page isn't HTTPS.
+        if base.startswith("https://"):
+            fwd = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "jwt"])
+            target = f"{base}/{path}/{filename}" + (f"?{fwd}" if fwd else "")
+            return RedirectResponse(target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    else:
         # No node serves this path → fall back to the agent's HTTPS cloudflared
         # tunnel. REDIRECT (don't proxy): the tunnel is HTTPS so no mixed content,
         # and a direct browser→MediaMTX session keeps `?session` consistent.
@@ -164,6 +171,10 @@ async def hls_proxy(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Камерт холбогдсон идэвхтэй AI зангилаа алга (зангилаа офлайн байж магадгүй).",
         )
+    # HTTP node base (LAN/dev only): the page isn't HTTPS so a redirect to mixed
+    # content would be blocked — proxy instead. Safe under a SINGLE web worker
+    # (one egress IP for master + sub + segments); if WEB_CONCURRENCY is raised,
+    # the node needs an HTTPS tunnel (handled by the redirect branch above).
     # Forward every query param EXCEPT our own jwt — MediaMTX's low-latency HLS
     # keys sub-playlists and segments on a `?session=…` param, so dropping the
     # query would 401 the stream (the bug that left the player on "H.265?").
