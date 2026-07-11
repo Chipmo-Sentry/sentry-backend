@@ -134,24 +134,31 @@ async def hls_proxy(
     HTTPS. Playlists are rewritten to keep the token on every nested request."""
     if not _token_ok(jwt, path):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid stream token")
-    # Agent's HTTPS cloudflared tunnel → REDIRECT the player straight to it instead
-    # of proxying. MediaMTX's HLS `?session` is bound to the CLIENT IP; proxying it
-    # through our multi-worker backend (each worker a different egress IP) means the
-    # master is fetched by one IP and the sub-playlist by another → MediaMTX 401s
-    # the sub. Redirecting makes hls.js talk to MediaMTX as ONE client, so the
-    # session stays consistent (master + sub + segments all from the browser). Auth
-    # is enforced here (jwt verified above); the tunnel URL is the post-auth secret.
-    agent_base = await _agent_tunnel_base(db, path)
-    if agent_base:
-        fwd = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "jwt"])
-        target = f"{agent_base}/{path}/{filename}" + (f"?{fwd}" if fwd else "")
-        return RedirectResponse(target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
-    # No fresh agent tunnel → fall back to proxying the node relay. (The node serves
-    # HTTP, so we MUST proxy for HTTPS + can't redirect the browser to mixed content.)
+    # PREFER the AI node's MediaMTX. The store agent pushes a BROWSER-SAFE stream to
+    # the node (H.265 → H.264 transcode on publish), whereas the agent's own tunnel
+    # serves the RAW camera codec off its local fan-out — an H.265 camera then plays
+    # on the node but shows "unsupported codec" through the tunnel. So the node is
+    # the correct primary whenever it serves the path; the agent tunnel is the
+    # fallback for edge/no-node stores.
+    #
+    # The node serves HTTP, so we MUST proxy (can't redirect an HTTPS page to
+    # mixed content). MediaMTX's low-latency HLS binds `?session` to the client IP;
+    # proxying is only safe because the backend runs a SINGLE web worker (one egress
+    # IP for master + sub + segments). If WEB_CONCURRENCY is ever raised, give the
+    # node its own HTTPS tunnel and redirect to it instead (as we do for the agent).
     base = await _node_hls_base(db, path)
     if not base:
-        # No online AI node is linked to this camera (none paired, or the node
-        # hasn't heart-beat recently so it dropped out of the served-path map).
+        # No node serves this path → fall back to the agent's HTTPS cloudflared
+        # tunnel. REDIRECT (don't proxy): the tunnel is HTTPS so no mixed content,
+        # and a direct browser→MediaMTX session keeps `?session` consistent.
+        agent_base = await _agent_tunnel_base(db, path)
+        if agent_base:
+            fwd = urlencode(
+                [(k, v) for k, v in request.query_params.multi_items() if k != "jwt"]
+            )
+            target = f"{agent_base}/{path}/{filename}" + (f"?{fwd}" if fwd else "")
+            return RedirectResponse(target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        # Neither a node nor a fresh agent tunnel serves this camera.
         log.warning("hls_proxy.no_node", camera_path=path)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
