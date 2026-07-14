@@ -117,6 +117,23 @@ class ZoneFlowSummary(BaseModel):
     edges: list[ZoneFlowEdge] = Field(default_factory=list)
 
 
+class WalkedPath(BaseModel):
+    """One anonymous visitor's simplified walked polyline (docs/30 F4 paths),
+    points normalized to the plan [0,1]²."""
+
+    started_at: datetime
+    duration_sec: float
+    points: list[list[float]]
+
+
+class PathsSummary(BaseModel):
+    """Recent walked paths for the spaghetti layer."""
+
+    window_from: datetime
+    window_to: datetime
+    paths: list[WalkedPath] = Field(default_factory=list)
+
+
 class DemographicSlice(BaseModel):
     """One demographic bucket's share of the window (docs/30 F5)."""
 

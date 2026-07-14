@@ -6,6 +6,7 @@ from sentry_backend.db.models.alert import Alert, AlertCategory, AlertLevel
 from sentry_backend.db.models.analytics_demographics import AnalyticsDemographics
 from sentry_backend.db.models.analytics_dwell import AnalyticsDwell
 from sentry_backend.db.models.analytics_flow import AnalyticsFlow
+from sentry_backend.db.models.analytics_path import AnalyticsPath
 from sentry_backend.db.models.analytics_footfall import AnalyticsFootfall
 from sentry_backend.db.models.analytics_visit import AnalyticsVisit
 from sentry_backend.db.models.app_config import AppConfig
@@ -46,6 +47,7 @@ __all__ = [
     "AnalyticsDemographics",
     "AnalyticsDwell",
     "AnalyticsFlow",
+    "AnalyticsPath",
     "AnalyticsFootfall",
     "AnalyticsVisit",
     "AppConfig",

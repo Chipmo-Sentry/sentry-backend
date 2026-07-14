@@ -13,6 +13,7 @@ the camera's placed position so the heatmap is still useful day one.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -48,6 +49,12 @@ _FALLBACK_RADIUS_FRAC = 0.28
 _GATE_TTL = 45.0
 # A track "completes" (its dwell is banked) once it's been absent this long.
 _PRESENCE_TTL = 45.0
+# Walked-path capture (docs/30 F4 paths): min normalized movement to record a
+# new sample, hard cap per track, and the simplification tolerance.
+_PATH_MIN_STEP = 0.008
+_PATH_MAX_POINTS = 400
+_PATH_RDP_EPS = 0.005
+_PATH_MIN_SAVED_POINTS = 3
 
 
 def _clamp_cell(v: float) -> int:
@@ -164,6 +171,35 @@ def _flow_adjacent(a: int, b: int) -> bool:
     return abs(ax - bx) <= 2 and abs(ay - by) <= 2
 
 
+def _rdp(pts: list[list[float]], eps: float) -> list[list[float]]:
+    """Douglas-Peucker polyline simplification (iterative, no recursion depth
+    worries at 400 points). Keeps the walked shape, sheds the jitter."""
+    if len(pts) < 3:
+        return pts
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        i0, i1 = stack.pop()
+        ax, ay = pts[i0]
+        bx, by = pts[i1]
+        seg = math.hypot(bx - ax, by - ay)
+        best_d, best_i = 0.0, -1
+        for i in range(i0 + 1, i1):
+            px_, py_ = pts[i]
+            if seg < 1e-12:
+                d = math.hypot(px_ - ax, py_ - ay)
+            else:
+                d = abs((bx - ax) * (ay - py_) - (ax - px_) * (by - ay)) / seg
+            if d > best_d:
+                best_d, best_i = d, i
+        if best_d > eps and best_i > 0:
+            keep[best_i] = True
+            stack.append((i0, best_i))
+            stack.append((best_i, i1))
+    return [p for p, k in zip(pts, keep) if k]
+
+
 def point_in_polygon(px: float, py: float, points: list[Any]) -> bool:
     """Ray-casting point-in-polygon. `points` are [x, y] plan coords."""
     n = len(points)
@@ -224,7 +260,7 @@ class _Presence:
     is stamped at first-seen from the frame wall time. `last_flow_cell` is the
     coarse FLOW_GRID cell last occupied, for movement-edge counting."""
 
-    __slots__ = ("first_mono", "last_mono", "store_id", "hour", "last_flow_cell")
+    __slots__ = ("first_mono", "last_mono", "store_id", "hour", "last_flow_cell", "path")
 
     def __init__(self, first_mono: float, store_id: UUID, hour: datetime) -> None:
         self.first_mono = first_mono
@@ -232,6 +268,10 @@ class _Presence:
         self.store_id = store_id
         self.hour = hour
         self.last_flow_cell: int | None = None
+        # Plan-normalized [x, y] samples of the walked path (docs/30 F4 paths).
+        # Appended only on real movement and capped, so a lingering shopper
+        # doesn't balloon memory; simplified + persisted when the track ends.
+        self.path: list[list[float]] = []
 
 
 def _demo_bucket(track: dict[str, Any]) -> tuple[str, str] | None:
@@ -281,6 +321,9 @@ class FootfallAggregator:
         self._dwell_buf: dict[tuple[UUID, str, datetime], list[int]] = {}
         # (store_id, camera_id, hour, from_cell, to_cell) → transition count.
         self._flow_buf: dict[tuple[UUID, str, datetime, int, int], int] = {}
+        # Finished walked paths awaiting insert (docs/30 F4 paths):
+        # (store_id, camera_id, hour, duration_sec, points).
+        self._path_buf: list[tuple[UUID, str, datetime, float, list[list[float]]]] = []
         # store_id → org_id (for the flush write)
         self._store_org: dict[UUID, UUID] = {}
         self._resolve: dict[str, _Resolved] = {}
@@ -342,6 +385,8 @@ class FootfallAggregator:
         present_pids: list[int] = []
         # (pid, coarse flow-cell index) for movement-edge counting.
         track_cells: list[tuple[int, int]] = []
+        # (pid, nx, ny) plan-normalized foot positions for path capture.
+        track_pts: list[tuple[int, float, float]] = []
         # (pid, gender, age_band) for demographics counting (F5).
         demo_hits: list[tuple[int, str, str]] = []
         for t in tracks:
@@ -368,6 +413,7 @@ class FootfallAggregator:
                 fx = max(0, min(FLOW_GRID - 1, int(px / sx * FLOW_GRID)))
                 fy = max(0, min(FLOW_GRID - 1, int(py / sy * FLOW_GRID)))
                 track_cells.append((pid, fy * FLOW_GRID + fx))
+                track_pts.append((pid, px / sx, py / sy))
             # Gate counting: is this track's foot inside an entrance/exit zone?
             if isinstance(pid, int) and resolved.gates:
                 for _fid, pts in resolved.gates:
@@ -405,6 +451,16 @@ class FootfallAggregator:
                 if fresh:
                     mk = (resolved.store_id, cam_path, hour, gender, age_band)
                     self._demo_buf[mk] = self._demo_buf.get(mk, 0) + 1
+            # Walked paths: sample the track's plan position on real movement.
+            for pid, nx, ny in track_pts:
+                pres = self._presence.get((cam_path, pid))
+                if pres is None or len(pres.path) >= _PATH_MAX_POINTS:
+                    continue
+                if pres.path:
+                    lx, ly = pres.path[-1]
+                    if (nx - lx) ** 2 + (ny - ly) ** 2 < _PATH_MIN_STEP**2:
+                        continue
+                pres.path.append([round(nx, 4), round(ny, 4)])
             # Movement flow: bump the edge when a track changes coarse cell.
             for pid, cell in track_cells:
                 pres = self._presence.get((cam_path, pid))
@@ -430,6 +486,12 @@ class FootfallAggregator:
         stale = [k for k, p in self._presence.items() if now - p.last_mono >= _PRESENCE_TTL]
         for k in stale:
             p = self._presence.pop(k)
+            if len(p.path) >= _PATH_MIN_SAVED_POINTS:
+                simplified = _rdp(p.path, _PATH_RDP_EPS)
+                if len(simplified) >= _PATH_MIN_SAVED_POINTS:
+                    self._path_buf.append(
+                        (p.store_id, k[0], p.hour, p.last_mono - p.first_mono, simplified)
+                    )
             dwell_ms = int((p.last_mono - p.first_mono) * 1000)
             dkey = (p.store_id, k[0], p.hour)
             bucket = self._dwell_buf.get(dkey)
@@ -465,6 +527,7 @@ class FootfallAggregator:
             and not self._dwell_buf
             and not self._flow_buf
             and not self._demo_buf
+            and not self._path_buf
         ):
             self._last_flush = time.monotonic()
             return
@@ -484,6 +547,11 @@ class FootfallAggregator:
         demo_by_store: dict[UUID, list[tuple[str, datetime, str, str, int]]] = {}
         for (store_id, camera_id, hour_ts, gender, age_band), n in self._demo_buf.items():
             demo_by_store.setdefault(store_id, []).append((camera_id, hour_ts, gender, age_band, n))
+        paths_by_store: dict[UUID, list[tuple[str, datetime, float, list[list[float]]]]] = {}
+        for store_id, camera_id, hour_ts, dur, pts in self._path_buf:
+            paths_by_store.setdefault(store_id, []).append((camera_id, hour_ts, dur, pts))
+        path_snapshot = self._path_buf
+        self._path_buf = []
         buf_snapshot = self._buf
         visits_snapshot = self._visits
         dwell_snapshot = self._dwell_buf
@@ -532,11 +600,19 @@ class FootfallAggregator:
                     await analytics_repo.bump_demographics(
                         db, organization_id=org_id, store_id=store_id, counts=dcounts2
                     )
+                for store_id, prows in paths_by_store.items():
+                    org_id = self._store_org.get(store_id)
+                    if org_id is None:
+                        continue
+                    await analytics_repo.insert_paths(
+                        db, organization_id=org_id, store_id=store_id, rows=prows
+                    )
                 await db.commit()
         except Exception:  # noqa: BLE001
             # Put the counts back so a transient DB blip doesn't lose data.
             # Called with self._lock already held, so re-add directly.
             log.exception("footfall.flush_failed")
+            self._path_buf.extend(path_snapshot)
             for key, n in buf_snapshot.items():
                 self._buf[key] = self._buf.get(key, 0) + n
             for vkey, n in visits_snapshot.items():

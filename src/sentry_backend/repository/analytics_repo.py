@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentry_backend.db.models.analytics_demographics import AnalyticsDemographics
 from sentry_backend.db.models.analytics_dwell import AnalyticsDwell
 from sentry_backend.db.models.analytics_flow import AnalyticsFlow
+from sentry_backend.db.models.analytics_path import AnalyticsPath
 from sentry_backend.db.models.analytics_footfall import AnalyticsFootfall
 from sentry_backend.db.models.analytics_visit import AnalyticsVisit
 
@@ -328,6 +329,58 @@ async def flow_edges_for_store(
         .limit(limit)
     )
     return [(fc, tc, int(n)) for fc, tc, n in result.all()]
+
+
+async def insert_paths(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    store_id: UUID,
+    rows: list[tuple[str, datetime, float, list[list[float]]]],
+) -> None:
+    """Insert finished walked paths. Each tuple is
+    (camera_id, started_at, duration_sec, points)."""
+    if not rows:
+        return
+    await db.execute(
+        pg_insert(AnalyticsPath).values(
+            [
+                {
+                    "organization_id": organization_id,
+                    "store_id": store_id,
+                    "camera_id": camera_id,
+                    "started_at": started_at,
+                    "duration_sec": round(dur, 1),
+                    "points": pts,
+                    "n_points": len(pts),
+                }
+                for camera_id, started_at, dur, pts in rows
+            ]
+        )
+    )
+
+
+async def paths_for_store(
+    db: AsyncSession,
+    *,
+    store_id: UUID,
+    start: datetime,
+    end: datetime,
+    limit: int = 400,
+) -> list[tuple[datetime, float, list[list[float]]]]:
+    """Most recent walked paths (started_at, duration_sec, points) in the
+    window, newest first, row-capped so the spaghetti layer stays light."""
+    result = await db.execute(
+        select(AnalyticsPath.started_at, AnalyticsPath.duration_sec, AnalyticsPath.points)
+        .where(
+            AnalyticsPath.store_id == store_id,
+            AnalyticsPath.started_at >= start,
+            AnalyticsPath.started_at < end,
+        )
+        .order_by(AnalyticsPath.started_at.desc())
+        .limit(limit)
+    )
+    return [(ts, float(d), pts) for ts, d, pts in result.all()]
 
 
 async def visits_by_dow_hour(

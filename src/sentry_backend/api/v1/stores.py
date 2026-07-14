@@ -28,6 +28,8 @@ from sentry_backend.schemas.analytics import (
     TrafficSummary,
     ZoneActivity,
     ZoneBreakdown,
+    PathsSummary,
+    WalkedPath,
     ZoneFlowEdge,
     ZoneFlowNode,
     ZoneFlowSummary,
@@ -411,6 +413,32 @@ async def get_store_zone_flow(
         edges=[
             ZoneFlowEdge(from_id=nodes[a].id, to_id=nodes[b].id, count=n) for (a, b), n in top
         ],
+    )
+
+
+# ── Walked paths (docs/30 F4 paths) — the spaghetti layer ────────────────────
+@router.get("/{store_id}/analytics/paths", response_model=PathsSummary)
+async def get_store_paths(
+    store_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    hours: Annotated[int, Query(ge=1, le=_MAX_HOURS)] = 24,
+    limit: Annotated[int, Query(ge=10, le=1000)] = 400,
+) -> PathsSummary:
+    """The most recent anonymous visitor paths over the window — thin dotted
+    traces that show the store's REAL walking corridors, one line per visit."""
+    store = await store_repo.get_store(db, store_id, org_id)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+    end = datetime.now(UTC)
+    start = end - timedelta(hours=hours)
+    rows = await analytics_repo.paths_for_store(
+        db, store_id=store_id, start=start, end=end, limit=limit
+    )
+    return PathsSummary(
+        window_from=start,
+        window_to=end,
+        paths=[WalkedPath(started_at=ts, duration_sec=d, points=pts) for ts, d, pts in rows],
     )
 
 
