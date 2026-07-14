@@ -37,7 +37,10 @@ class AiNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Centrally-managed config (pushed to the node via GET /ai-nodes/config).
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    provider: Mapped[str] = mapped_column(String(64), default="qwen3-vl-4b", nullable=False)
+    # Default for FRESHLY PAIRED nodes. vLLM is the production standard (owner
+    # decision, 2026-07): a replacement node must come up on vLLM without a
+    # superadmin dropdown visit. qwen3-vl-4b (Ollama) stays the rollback path.
+    provider: Mapped[str] = mapped_column(String(64), default="qwen3-vl-vllm", nullable=False)
     frame_skip: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     # Per-node YOLO + scan/VLM tuning (central control, like provider/breach_mode).
     # The node polls these from /ai-nodes/config and hot-applies them to its
