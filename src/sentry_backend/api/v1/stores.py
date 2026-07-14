@@ -28,6 +28,9 @@ from sentry_backend.schemas.analytics import (
     TrafficSummary,
     ZoneActivity,
     ZoneBreakdown,
+    ZoneFlowEdge,
+    ZoneFlowNode,
+    ZoneFlowSummary,
 )
 from sentry_backend.schemas.floor_plan import DEFAULT_PLAN_SIZE, FloorPlan
 from sentry_backend.schemas.store import StoreCreate, StorePublic, StoreUpdate
@@ -301,6 +304,113 @@ async def get_store_flow(
         window_to=end,
         max_count=max_count,
         edges=edges,
+    )
+
+
+_ZONE_TYPE_LABEL = {
+    "shelf": "Тавиур",
+    "fridge": "Хөргүүр",
+    "mannequin": "Маникен",
+    "checkout": "Касс",
+    "exit": "Орц/Гарц",
+    "entrance": "Орц",
+}
+_ZONE_FLOW_TOP_EDGES = 10
+
+
+# ── Zone flow (docs/30 F4, zone level) — «Орц → Тавиур → Касс» graph ─────────
+@router.get("/{store_id}/analytics/zone-flow", response_model=ZoneFlowSummary)
+async def get_store_zone_flow(
+    store_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    hours: Annotated[int, Query(ge=1, le=_MAX_HOURS)] = 24,
+) -> ZoneFlowSummary:
+    """The movement graph collapsed onto the operator-drawn plan fixtures.
+
+    The raw FLOW_GRID lattice reads as grid geometry, not shopper behaviour.
+    Here every cell is assigned to its containing fixture — or, for walkway
+    cells, the nearest fixture centroid (a Voronoi partition) — and the
+    cell-to-cell transition counts are summed per zone pair. Opposite
+    directions cancel into net flow, so the frontend draws a handful of named
+    arrows («Орц → Тавиур А») instead of a mesh."""
+    store = await store_repo.get_store(db, store_id, org_id)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+
+    end = datetime.now(UTC)
+    start = end - timedelta(hours=hours)
+    empty = ZoneFlowSummary(window_from=start, window_to=end, max_count=0)
+
+    plan = store.floor_plan or {}
+    size = plan.get("size") or DEFAULT_PLAN_SIZE
+    try:
+        pw, ph = float(size[0]) or 1.0, float(size[1]) or 1.0
+    except (TypeError, ValueError, IndexError):
+        pw, ph = DEFAULT_PLAN_SIZE
+
+    nodes: list[ZoneFlowNode] = []
+    polys: list[list[list[float]]] = []
+    for i, f in enumerate(plan.get("fixtures") or []):
+        ftype = str(f.get("type") or "")
+        pts = f.get("points") or []
+        if ftype == "furniture" or len(pts) < 3:
+            continue  # scenery never carries flow semantics
+        norm = [[float(x) / pw, float(y) / ph] for x, y in pts]
+        cx = sum(p[0] for p in norm) / len(norm)
+        cy = sum(p[1] for p in norm) / len(norm)
+        label = str(f.get("label") or "") or f"{_ZONE_TYPE_LABEL.get(ftype, ftype)} {i + 1}"
+        nodes.append(
+            ZoneFlowNode(id=str(f.get("id") or f"z{i}"), label=label, type=ftype, x=cx, y=cy)
+        )
+        polys.append(norm)
+    if len(nodes) < 2:
+        return empty  # nothing to flow between — the frontend explains why
+
+    def zone_of(cx: float, cy: float) -> int:
+        for i, poly in enumerate(polys):
+            if point_in_polygon(cx, cy, poly):
+                return i
+        best, best_d = 0, float("inf")
+        for i, n in enumerate(nodes):
+            d = (n.x - cx) ** 2 + (n.y - cy) ** 2
+            if d < best_d:
+                best, best_d = i, d
+        return best
+
+    cell_zone = [
+        zone_of((c % FLOW_GRID + 0.5) / FLOW_GRID, (c // FLOW_GRID + 0.5) / FLOW_GRID)
+        for c in range(FLOW_GRID * FLOW_GRID)
+    ]
+
+    raw = await analytics_repo.flow_edges_for_store(db, store_id=store_id, start=start, end=end)
+    gross: dict[tuple[int, int], int] = {}
+    for fc, tc, n in raw:
+        za, zb = cell_zone[fc], cell_zone[tc]
+        if za == zb:
+            continue
+        gross[(za, zb)] = gross.get((za, zb), 0) + n
+
+    net: dict[tuple[int, int], int] = {}
+    for (za, zb), n in gross.items():
+        if (zb, za) in net:
+            continue
+        diff = n - gross.get((zb, za), 0)
+        if diff > 0:
+            net[(za, zb)] = diff
+        elif diff < 0:
+            net[(zb, za)] = -diff
+
+    top = sorted(net.items(), key=lambda kv: kv[1], reverse=True)[:_ZONE_FLOW_TOP_EDGES]
+    used = {i for (a, b), _ in top for i in (a, b)}
+    return ZoneFlowSummary(
+        window_from=start,
+        window_to=end,
+        max_count=top[0][1] if top else 0,
+        nodes=[n for i, n in enumerate(nodes) if i in used],
+        edges=[
+            ZoneFlowEdge(from_id=nodes[a].id, to_id=nodes[b].id, count=n) for (a, b), n in top
+        ],
     )
 
 

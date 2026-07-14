@@ -85,6 +85,38 @@ class FlowSummary(BaseModel):
     edges: list[FlowEdge] = Field(default_factory=list)
 
 
+class ZoneFlowNode(BaseModel):
+    """A semantic area of the store (a drawn fixture, or the walkway) — the
+    node set of the zone-flow graph. Centroid normalized to the plan [0,1]²."""
+
+    id: str
+    label: str
+    type: str  # shelf | fridge | mannequin | checkout | exit | walkway
+    x: float
+    y: float
+
+
+class ZoneFlowEdge(BaseModel):
+    """Net movement between two zones over the window (direction of the
+    winner after opposite flows cancel)."""
+
+    from_id: str
+    to_id: str
+    count: int
+
+
+class ZoneFlowSummary(BaseModel):
+    """Zone-to-zone movement graph (docs/30 F4 flow, zone level). The raw
+    cell lattice reads as grid geometry, not behaviour — collapsing it onto
+    the operator-drawn fixtures gives «Орц → Тавиур → Касс» arrows instead."""
+
+    window_from: datetime
+    window_to: datetime
+    max_count: int
+    nodes: list[ZoneFlowNode] = Field(default_factory=list)
+    edges: list[ZoneFlowEdge] = Field(default_factory=list)
+
+
 class DemographicSlice(BaseModel):
     """One demographic bucket's share of the window (docs/30 F5)."""
 
