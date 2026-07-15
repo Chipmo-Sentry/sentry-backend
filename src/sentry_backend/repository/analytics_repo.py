@@ -336,10 +336,10 @@ async def insert_paths(
     *,
     organization_id: UUID,
     store_id: UUID,
-    rows: list[tuple[str, datetime, float, list[list[float]]]],
+    rows: list[tuple[str, datetime, float, list[list[float]], str | None, str | None]],
 ) -> None:
     """Insert finished walked paths. Each tuple is
-    (camera_id, started_at, duration_sec, points)."""
+    (camera_id, started_at, duration_sec, points, gender, age_band)."""
     if not rows:
         return
     await db.execute(
@@ -353,8 +353,10 @@ async def insert_paths(
                     "duration_sec": round(dur, 1),
                     "points": pts,
                     "n_points": len(pts),
+                    "gender": gender,
+                    "age_band": age,
                 }
-                for camera_id, started_at, dur, pts in rows
+                for camera_id, started_at, dur, pts, gender, age in rows
             ]
         )
     )
@@ -367,11 +369,17 @@ async def paths_for_store(
     start: datetime,
     end: datetime,
     limit: int = 400,
-) -> list[tuple[datetime, float, list[list[float]]]]:
-    """Most recent walked paths (started_at, duration_sec, points) in the
-    window, newest first, row-capped so the spaghetti layer stays light."""
+) -> list[tuple[datetime, float, list[list[float]], str | None, str | None]]:
+    """Most recent walked paths (started_at, duration_sec, points, gender,
+    age_band), newest first, row-capped so the spaghetti layer stays light."""
     result = await db.execute(
-        select(AnalyticsPath.started_at, AnalyticsPath.duration_sec, AnalyticsPath.points)
+        select(
+            AnalyticsPath.started_at,
+            AnalyticsPath.duration_sec,
+            AnalyticsPath.points,
+            AnalyticsPath.gender,
+            AnalyticsPath.age_band,
+        )
         .where(
             AnalyticsPath.store_id == store_id,
             AnalyticsPath.started_at >= start,
@@ -380,7 +388,7 @@ async def paths_for_store(
         .order_by(AnalyticsPath.started_at.desc())
         .limit(limit)
     )
-    return [(ts, float(d), pts) for ts, d, pts in result.all()]
+    return [(ts, float(d), pts, g, a) for ts, d, pts, g, a in result.all()]
 
 
 async def visits_by_dow_hour(

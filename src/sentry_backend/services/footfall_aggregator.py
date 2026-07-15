@@ -260,7 +260,16 @@ class _Presence:
     is stamped at first-seen from the frame wall time. `last_flow_cell` is the
     coarse FLOW_GRID cell last occupied, for movement-edge counting."""
 
-    __slots__ = ("first_mono", "last_mono", "store_id", "hour", "last_flow_cell", "path")
+    __slots__ = (
+        "first_mono",
+        "last_mono",
+        "store_id",
+        "hour",
+        "last_flow_cell",
+        "path",
+        "gender",
+        "age_band",
+    )
 
     def __init__(self, first_mono: float, store_id: UUID, hour: datetime) -> None:
         self.first_mono = first_mono
@@ -272,6 +281,10 @@ class _Presence:
         # Appended only on real movement and capped, so a lingering shopper
         # doesn't balloon memory; simplified + persisted when the track ends.
         self.path: list[list[float]] = []
+        # Demographics from the track's classifier attributes (F5) — stick to
+        # the first classification so the saved path can be coloured by it.
+        self.gender: str | None = None
+        self.age_band: str | None = None
 
 
 def _demo_bucket(track: dict[str, Any]) -> tuple[str, str] | None:
@@ -389,7 +402,7 @@ class FootfallAggregator:
         self._flow_buf: dict[tuple[UUID, str, datetime, int, int], int] = {}
         # Finished walked paths awaiting insert (docs/30 F4 paths):
         # (store_id, camera_id, hour, duration_sec, points).
-        self._path_buf: list[tuple[UUID, str, datetime, float, list[list[float]]]] = []
+        self._path_buf: list[tuple[UUID, str, datetime, float, list[list[float]], str | None, str | None]] = []
         # store_id → org_id (for the flush write)
         self._store_org: dict[UUID, UUID] = {}
         # store_id → normalized wall segments (for path splitting on save)
@@ -511,6 +524,12 @@ class FootfallAggregator:
                     self._presence[pk] = _Presence(now, resolved.store_id, hour)
                 else:
                     pres.last_mono = now
+            # Stamp the walker's demographics onto their presence (path colour).
+            for pid, gender, age_band in demo_hits:
+                pres = self._presence.get((cam_path, pid))
+                if pres is not None and pres.gender is None and gender != "unknown":
+                    pres.gender = gender
+                    pres.age_band = age_band if age_band != "unknown" else None
             # Demographics: count each classified track once per TTL window
             # (refresh last-seen while continuously visible, like gates).
             for pid, gender, age_band in demo_hits:
@@ -561,7 +580,15 @@ class FootfallAggregator:
                     simplified = _rdp(part, _PATH_RDP_EPS)
                     if len(simplified) >= _PATH_MIN_SAVED_POINTS:
                         self._path_buf.append(
-                            (p.store_id, k[0], p.hour, p.last_mono - p.first_mono, simplified)
+                            (
+                                p.store_id,
+                                k[0],
+                                p.hour,
+                                p.last_mono - p.first_mono,
+                                simplified,
+                                p.gender,
+                                p.age_band,
+                            )
                         )
             dwell_ms = int((p.last_mono - p.first_mono) * 1000)
             dkey = (p.store_id, k[0], p.hour)
@@ -618,9 +645,13 @@ class FootfallAggregator:
         demo_by_store: dict[UUID, list[tuple[str, datetime, str, str, int]]] = {}
         for (store_id, camera_id, hour_ts, gender, age_band), n in self._demo_buf.items():
             demo_by_store.setdefault(store_id, []).append((camera_id, hour_ts, gender, age_band, n))
-        paths_by_store: dict[UUID, list[tuple[str, datetime, float, list[list[float]]]]] = {}
-        for store_id, camera_id, hour_ts, dur, pts in self._path_buf:
-            paths_by_store.setdefault(store_id, []).append((camera_id, hour_ts, dur, pts))
+        paths_by_store: dict[
+            UUID, list[tuple[str, datetime, float, list[list[float]], str | None, str | None]]
+        ] = {}
+        for store_id, camera_id, hour_ts, dur, pts, gender, age in self._path_buf:
+            paths_by_store.setdefault(store_id, []).append(
+                (camera_id, hour_ts, dur, pts, gender, age)
+            )
         path_snapshot = self._path_buf
         self._path_buf = []
         buf_snapshot = self._buf

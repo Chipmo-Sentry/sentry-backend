@@ -45,6 +45,11 @@ class AnalyticsPath(UUIDPrimaryKeyMixin, Base):
         DateTime(timezone=True), index=True, nullable=False
     )
     duration_sec: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # Demographics of the walker when the classifier labelled the track
+    # (docs/30 F5); None = unclassified. Closed vocab: male|female /
+    # child|youth|adult|senior.
+    gender: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    age_band: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # [[x, y], ...] normalized to the plan [0,1]² — already simplified.
     points: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
     n_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -124,6 +124,8 @@ class WalkedPath(BaseModel):
     started_at: datetime
     duration_sec: float
     points: list[list[float]]
+    gender: str | None = None  # male | female | None(unclassified)
+    age_band: str | None = None  # child | youth | adult | senior | None
 
 
 class PathsSummary(BaseModel):
