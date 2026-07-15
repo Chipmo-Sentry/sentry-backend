@@ -51,9 +51,9 @@ _GATE_TTL = 45.0
 _PRESENCE_TTL = 45.0
 # Walked-path capture (docs/30 F4 paths): min normalized movement to record a
 # new sample, hard cap per track, and the simplification tolerance.
-_PATH_MIN_STEP = 0.008
+_PATH_MIN_STEP = 0.005
 _PATH_MAX_POINTS = 400
-_PATH_RDP_EPS = 0.005
+_PATH_RDP_EPS = 0.003
 _PATH_MIN_SAVED_POINTS = 3
 
 
@@ -299,6 +299,72 @@ def _extract_gates(plan: dict[str, Any] | None) -> list[tuple[str, list[Any]]]:
     return gates
 
 
+def _extract_walls(plan: dict[str, Any] | None) -> list[tuple[float, float, float, float]]:
+    """Wall segments normalized to the plan [0,1]² — used to split walked paths
+    that would otherwise cut straight through a wall (docs/30 F4 paths)."""
+    segs: list[tuple[float, float, float, float]] = []
+    if not plan:
+        return segs
+    size = plan.get("size") or (20.0, 20.0)
+    try:
+        pw, ph = float(size[0]) or 1.0, float(size[1]) or 1.0
+    except (TypeError, ValueError, IndexError):
+        return segs
+    for wall in plan.get("walls") or []:
+        pts = wall.get("points") if isinstance(wall, dict) else None
+        if not isinstance(pts, list) or len(pts) < 2:
+            continue
+        for a, b in zip(pts, pts[1:]):
+            try:
+                segs.append((a[0] / pw, a[1] / ph, b[0] / pw, b[1] / ph))
+            except (TypeError, ValueError, IndexError):
+                continue
+    return segs
+
+
+def _segs_intersect(
+    ax: float, ay: float, bx: float, by: float, seg: tuple[float, float, float, float]
+) -> bool:
+    """Proper segment-segment intersection (shared endpoints don't count)."""
+    cx, cy, dx, dy = seg
+
+    def cross(ox: float, oy: float, px: float, py: float, qx: float, qy: float) -> float:
+        return (px - ox) * (qy - oy) - (py - oy) * (qx - ox)
+
+    d1 = cross(cx, cy, dx, dy, ax, ay)
+    d2 = cross(cx, cy, dx, dy, bx, by)
+    d3 = cross(ax, ay, bx, by, cx, cy)
+    d4 = cross(ax, ay, bx, by, dx, dy)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+
+# A walking human cannot move this far (normalized plan units) between two
+# consecutive samples — such a jump is a track-id switch / re-id teleport, and
+# bridging it draws a straight line through the store (and its walls).
+_PATH_TELEPORT = 0.12
+
+
+def _split_path(
+    pts: list[list[float]], walls: list[tuple[float, float, float, float]]
+) -> list[list[list[float]]]:
+    """Split a raw walked path wherever a segment teleports or crosses a wall —
+    people go around walls; a trace that pierces one is a tracking artifact."""
+    parts: list[list[list[float]]] = []
+    cur: list[list[float]] = [pts[0]]
+    for a, b in zip(pts, pts[1:]):
+        jump = math.hypot(b[0] - a[0], b[1] - a[1]) >= _PATH_TELEPORT
+        blocked = jump or any(_segs_intersect(a[0], a[1], b[0], b[1], s) for s in walls)
+        if blocked:
+            if len(cur) >= _PATH_MIN_SAVED_POINTS:
+                parts.append(cur)
+            cur = [b]
+        else:
+            cur.append(b)
+    if len(cur) >= _PATH_MIN_SAVED_POINTS:
+        parts.append(cur)
+    return parts
+
+
 class FootfallAggregator:
     def __init__(self) -> None:
         # (store_id, camera_id, hour_ts, gx, gy) → sample count
@@ -326,6 +392,8 @@ class FootfallAggregator:
         self._path_buf: list[tuple[UUID, str, datetime, float, list[list[float]]]] = []
         # store_id → org_id (for the flush write)
         self._store_org: dict[UUID, UUID] = {}
+        # store_id → normalized wall segments (for path splitting on save)
+        self._store_walls: dict[UUID, list[tuple[float, float, float, float]]] = {}
         self._resolve: dict[str, _Resolved] = {}
         self._lock = asyncio.Lock()
         self._last_flush = time.monotonic()
@@ -354,6 +422,7 @@ class FootfallAggregator:
             org_id = store.organization_id if store else None
             plan = store.floor_plan if store else None
             resolved = _Resolved(org_id, cam.store_id, plan, now, _extract_gates(plan))
+            self._store_walls[cam.store_id] = _extract_walls(plan)
             self._resolve[camera_id] = resolved
             if org_id is not None:
                 self._store_org[cam.store_id] = org_id
@@ -487,11 +556,13 @@ class FootfallAggregator:
         for k in stale:
             p = self._presence.pop(k)
             if len(p.path) >= _PATH_MIN_SAVED_POINTS:
-                simplified = _rdp(p.path, _PATH_RDP_EPS)
-                if len(simplified) >= _PATH_MIN_SAVED_POINTS:
-                    self._path_buf.append(
-                        (p.store_id, k[0], p.hour, p.last_mono - p.first_mono, simplified)
-                    )
+                walls = self._store_walls.get(p.store_id) or []
+                for part in _split_path(p.path, walls):
+                    simplified = _rdp(part, _PATH_RDP_EPS)
+                    if len(simplified) >= _PATH_MIN_SAVED_POINTS:
+                        self._path_buf.append(
+                            (p.store_id, k[0], p.hour, p.last_mono - p.first_mono, simplified)
+                        )
             dwell_ms = int((p.last_mono - p.first_mono) * 1000)
             dkey = (p.store_id, k[0], p.hour)
             bucket = self._dwell_buf.get(dkey)
