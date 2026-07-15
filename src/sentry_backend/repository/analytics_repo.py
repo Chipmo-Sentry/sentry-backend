@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentry_backend.db.models.analytics_demographics import AnalyticsDemographics
 from sentry_backend.db.models.analytics_dwell import AnalyticsDwell
 from sentry_backend.db.models.analytics_flow import AnalyticsFlow
-from sentry_backend.db.models.analytics_path import AnalyticsPath
 from sentry_backend.db.models.analytics_footfall import AnalyticsFootfall
+from sentry_backend.db.models.analytics_path import AnalyticsPath
 from sentry_backend.db.models.analytics_visit import AnalyticsVisit
 
 

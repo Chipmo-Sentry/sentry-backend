@@ -187,9 +187,7 @@ async def hls_proxy(
         # and a direct browser→MediaMTX session keeps `?session` consistent.
         agent_base = await _agent_tunnel_base(db, path)
         if agent_base:
-            fwd = urlencode(
-                [(k, v) for k, v in request.query_params.multi_items() if k != "jwt"]
-            )
+            fwd = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "jwt"])
             target = f"{agent_base}/{path}/{filename}" + (f"?{fwd}" if fwd else "")
             return RedirectResponse(target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
         # Neither a node nor a fresh agent tunnel serves this camera.

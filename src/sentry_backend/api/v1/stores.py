@@ -22,14 +22,14 @@ from sentry_backend.schemas.analytics import (
     FlowEdge,
     FlowSummary,
     FootfallGrid,
+    PathsSummary,
     PeakCell,
     PeakMatrix,
     TrafficPoint,
     TrafficSummary,
+    WalkedPath,
     ZoneActivity,
     ZoneBreakdown,
-    PathsSummary,
-    WalkedPath,
     ZoneFlowEdge,
     ZoneFlowNode,
     ZoneFlowSummary,
@@ -410,9 +410,7 @@ async def get_store_zone_flow(
         window_to=end,
         max_count=top[0][1] if top else 0,
         nodes=[n for i, n in enumerate(nodes) if i in used],
-        edges=[
-            ZoneFlowEdge(from_id=nodes[a].id, to_id=nodes[b].id, count=n) for (a, b), n in top
-        ],
+        edges=[ZoneFlowEdge(from_id=nodes[a].id, to_id=nodes[b].id, count=n) for (a, b), n in top],
     )
 
 

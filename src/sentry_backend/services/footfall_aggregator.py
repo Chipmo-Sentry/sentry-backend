@@ -197,7 +197,7 @@ def _rdp(pts: list[list[float]], eps: float) -> list[list[float]]:
             keep[best_i] = True
             stack.append((i0, best_i))
             stack.append((best_i, i1))
-    return [p for p, k in zip(pts, keep) if k]
+    return [p for p, k in zip(pts, keep, strict=True) if k]
 
 
 def point_in_polygon(px: float, py: float, points: list[Any]) -> bool:
@@ -327,7 +327,7 @@ def _extract_walls(plan: dict[str, Any] | None) -> list[tuple[float, float, floa
         pts = wall.get("points") if isinstance(wall, dict) else None
         if not isinstance(pts, list) or len(pts) < 2:
             continue
-        for a, b in zip(pts, pts[1:]):
+        for a, b in zip(pts, pts[1:], strict=False):
             try:
                 segs.append((a[0] / pw, a[1] / ph, b[0] / pw, b[1] / ph))
             except (TypeError, ValueError, IndexError):
@@ -364,7 +364,7 @@ def _split_path(
     people go around walls; a trace that pierces one is a tracking artifact."""
     parts: list[list[list[float]]] = []
     cur: list[list[float]] = [pts[0]]
-    for a, b in zip(pts, pts[1:]):
+    for a, b in zip(pts, pts[1:], strict=False):
         jump = math.hypot(b[0] - a[0], b[1] - a[1]) >= _PATH_TELEPORT
         blocked = jump or any(_segs_intersect(a[0], a[1], b[0], b[1], s) for s in walls)
         if blocked:
@@ -402,7 +402,9 @@ class FootfallAggregator:
         self._flow_buf: dict[tuple[UUID, str, datetime, int, int], int] = {}
         # Finished walked paths awaiting insert (docs/30 F4 paths):
         # (store_id, camera_id, hour, duration_sec, points).
-        self._path_buf: list[tuple[UUID, str, datetime, float, list[list[float]], str | None, str | None]] = []
+        self._path_buf: list[
+            tuple[UUID, str, datetime, float, list[list[float]], str | None, str | None]
+        ] = []
         # store_id → org_id (for the flush write)
         self._store_org: dict[UUID, UUID] = {}
         # store_id → normalized wall segments (for path splitting on save)
