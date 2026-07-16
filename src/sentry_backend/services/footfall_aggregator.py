@@ -312,6 +312,30 @@ def _extract_gates(plan: dict[str, Any] | None) -> list[tuple[str, list[Any]]]:
     return gates
 
 
+def _extract_cam_pos(
+    plan: dict[str, Any] | None, camera_id: str
+) -> tuple[float, float] | None:
+    """The camera's operator-placed plan position, normalized to [0,1]² — used
+    to reject walked-path samples the camera can only be seeing THROUGH a wall
+    (e.g. pedestrians outside the glass storefront)."""
+    if not plan:
+        return None
+    size = plan.get("size") or (20.0, 20.0)
+    try:
+        pw, ph = float(size[0]) or 1.0, float(size[1]) or 1.0
+    except (TypeError, ValueError, IndexError):
+        return None
+    for c in plan.get("cameras") or []:
+        if str(c.get("camera_id")) == camera_id:
+            pos = c.get("pos")
+            if isinstance(pos, (list, tuple)) and len(pos) == 2:
+                try:
+                    return (float(pos[0]) / pw, float(pos[1]) / ph)
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
 def _extract_walls(plan: dict[str, Any] | None) -> list[tuple[float, float, float, float]]:
     """Wall segments normalized to the plan [0,1]² — used to split walked paths
     that would otherwise cut straight through a wall (docs/30 F4 paths)."""
@@ -409,6 +433,8 @@ class FootfallAggregator:
         self._store_org: dict[UUID, UUID] = {}
         # store_id → normalized wall segments (for path splitting on save)
         self._store_walls: dict[UUID, list[tuple[float, float, float, float]]] = {}
+        # (store_id, camera_id) → camera's normalized plan position.
+        self._cam_pos: dict[tuple[UUID, str], tuple[float, float]] = {}
         self._resolve: dict[str, _Resolved] = {}
         self._lock = asyncio.Lock()
         self._last_flush = time.monotonic()
@@ -438,6 +464,9 @@ class FootfallAggregator:
             plan = store.floor_plan if store else None
             resolved = _Resolved(org_id, cam.store_id, plan, now, _extract_gates(plan))
             self._store_walls[cam.store_id] = _extract_walls(plan)
+            pos = _extract_cam_pos(plan, camera_id)
+            if pos is not None:
+                self._cam_pos[(cam.store_id, camera_id)] = pos
             self._resolve[camera_id] = resolved
             if org_id is not None:
                 self._store_org[cam.store_id] = org_id
@@ -542,10 +571,25 @@ class FootfallAggregator:
                     mk = (resolved.store_id, cam_path, hour, gender, age_band)
                     self._demo_buf[mk] = self._demo_buf.get(mk, 0) + 1
             # Walked paths: sample the track's plan position on real movement.
+            walls_here = self._store_walls.get(resolved.store_id) or []
+            cpos = self._cam_pos.get((resolved.store_id, cam_path))
             for pid, nx, ny in track_pts:
                 pres = self._presence.get((cam_path, pid))
                 if pres is None or len(pres.path) >= _PATH_MAX_POINTS:
                     continue
+                # Off-canvas projections are homography extrapolation noise.
+                if not (-0.01 <= nx <= 1.01 and -0.01 <= ny <= 1.01):
+                    continue
+                # A wall between the camera and the foot point means the person
+                # is OUTSIDE the room (sidewalk through the glass storefront) —
+                # their path must not be drawn inside the store's map.
+                if cpos is not None and walls_here:
+                    # The camera is mounted ON a wall — start the sight segment
+                    # slightly toward the sample so its own wall doesn't occlude.
+                    sx0 = cpos[0] + (nx - cpos[0]) * 0.04
+                    sy0 = cpos[1] + (ny - cpos[1]) * 0.04
+                    if any(_segs_intersect(sx0, sy0, nx, ny, s) for s in walls_here):
+                        continue
                 if pres.path:
                     lx, ly = pres.path[-1]
                     if (nx - lx) ** 2 + (ny - ly) ** 2 < _PATH_MIN_STEP**2:
