@@ -116,6 +116,17 @@ def project_foot_to_plan(
         # The agent stores H as plan → normalized-image (cv2.findHomography(plan,
         # img) in floor_plan_web._compute_calibration). We need the OPPOSITE here
         # — a normalized-image foot point → plan — so apply the inverse.
+        # v0.7.95+ calibrations fit H against LENS-UNDISTORTED image coords and
+        # save the k1 term alongside — undo the camera's radial distortion on
+        # the observed foot point first, or edge-of-frame feet land short/long.
+        try:
+            k1 = float(cam.get("k1") or 0.0)
+        except (TypeError, ValueError):
+            k1 = 0.0
+        if k1:
+            dx, dy = foot_nx - 0.5, foot_ny - 0.5
+            s = 1.0 + k1 * (dx * dx + dy * dy)
+            foot_nx, foot_ny = 0.5 + dx * s, 0.5 + dy * s
         inv = _invert_3x3(homography)
         if inv is None:
             return None

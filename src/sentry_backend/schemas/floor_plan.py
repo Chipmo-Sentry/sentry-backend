@@ -89,6 +89,10 @@ class FloorCamera(BaseModel):
     # (This is what cv2.findHomography(plan, img) yields in _compute_calibration;
     # consumers that need image→plan — e.g. the footfall aggregator — invert it.)
     homography: list[list[float]] | None = None
+    # Radial lens term (v0.7.95+): H above is fitted against k1-UNDISTORTED
+    # image coords — consumers must undistort observed points with this k1
+    # before applying H⁻¹. None/0 = pre-k1 calibration, H works on raw coords.
+    k1: float | None = None
     reproj_err: float | None = None
     calib_points: list[CalibPoint] | None = Field(default=None, max_length=MAX_CALIB_POINTS)
 
