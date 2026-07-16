@@ -312,9 +312,7 @@ def _extract_gates(plan: dict[str, Any] | None) -> list[tuple[str, list[Any]]]:
     return gates
 
 
-def _extract_cam_pos(
-    plan: dict[str, Any] | None, camera_id: str
-) -> tuple[float, float] | None:
+def _extract_cam_pos(plan: dict[str, Any] | None, camera_id: str) -> tuple[float, float] | None:
     """The camera's operator-placed plan position, normalized to [0,1]² — used
     to reject walked-path samples the camera can only be seeing THROUGH a wall
     (e.g. pedestrians outside the glass storefront)."""
