@@ -47,6 +47,9 @@ _FALLBACK_RADIUS_FRAC = 0.28
 # A track continuously inside a gate zone counts once; once it's been gone this
 # long it's forgotten so a real re-entry recounts. Also the prune horizon.
 _GATE_TTL = 45.0
+# Store-person visit spans (true dwell): a shopper may vanish between cameras
+# for a while — bridge gaps up to this many seconds before closing the visit.
+_SP_TTL = 120.0
 # A track "completes" (its dwell is banked) once it's been absent this long.
 _PRESENCE_TTL = 45.0
 # Walked-path capture (docs/30 F4 paths): min normalized movement to record a
@@ -269,6 +272,7 @@ class _Presence:
         "path",
         "gender",
         "age_band",
+        "has_sp",
     )
 
     def __init__(self, first_mono: float, store_id: UUID, hour: datetime) -> None:
@@ -285,6 +289,9 @@ class _Presence:
         # the first classification so the saved path can be coloured by it.
         self.gender: str | None = None
         self.age_band: str | None = None
+        # True once the track carried a store_person_id — its dwell then lives
+        # in the cross-camera span, not the per-camera fragment.
+        self.has_sp = False
 
 
 def _demo_bucket(track: dict[str, Any]) -> tuple[str, str] | None:
@@ -409,10 +416,15 @@ class FootfallAggregator:
         # (camera_id, person_id) → last monotonic time seen inside a gate. A track
         # counts as ONE visit while continuously in the zone; once it leaves for
         # more than _GATE_TTL it's forgotten, so a genuine re-entry recounts.
-        self._gate_seen: dict[tuple[str, int], float] = {}
+        self._gate_seen: dict[tuple, float] = {}
         self._gate_last_prune = time.monotonic()
         # (camera_id, person_id) → active presence span (dwell-time, F3+).
         self._presence: dict[tuple[str, int], _Presence] = {}
+        # (store_id, store_person_id) → cross-camera visit span [first, last,
+        # hour] — the TRUE «нэг зочны дэлгүүрт байсан хугацаа». Banked into the
+        # dwell table under the synthetic camera "__store__" when the shopper
+        # hasn't been seen anywhere for _SP_TTL.
+        self._sp_presence: dict[tuple[UUID, int], list] = {}
         # (camera_id, person_id) → last time counted for demographics (F5).
         # Same dedup model as gates: one count per track per _GATE_TTL window.
         self._demo_seen: dict[tuple[str, int], float] = {}
@@ -491,9 +503,11 @@ class FootfallAggregator:
         pending: list[tuple[tuple[UUID, str, datetime, int, int], int]] = []
         # (camera, pid) that are inside a gate this frame, and whether it's a
         # fresh visit (first time we've seen this track in a gate).
-        gate_hits: list[tuple[str, int, bool]] = []
+        gate_hits: list[tuple[tuple, bool]] = []
         # person_ids seen this frame (for dwell presence tracking).
         present_pids: list[int] = []
+        # (pid, store_person_id|None) pairs — re-ID identity per track.
+        sp_keys: list[tuple[int, int | None]] = []
         # (pid, coarse flow-cell index) for movement-edge counting.
         track_cells: list[tuple[int, int]] = []
         # (pid, nx, ny) plan-normalized foot positions for path capture.
@@ -502,8 +516,12 @@ class FootfallAggregator:
         demo_hits: list[tuple[int, str, str]] = []
         for t in tracks:
             pid = t.get("person_id")
+            sp = t.get("store_person_id")
             if isinstance(pid, int):
                 present_pids.append(pid)
+                # Cross-camera identity for visit dedup + true visit dwell:
+                # the SAME shopper keeps one key across cameras/track churn.
+                sp_keys.append((pid, sp if isinstance(sp, int) else None))
                 demo = _demo_bucket(t)
                 if demo is not None:
                     demo_hits.append((pid, demo[0], demo[1]))
@@ -529,8 +547,14 @@ class FootfallAggregator:
             if isinstance(pid, int) and resolved.gates:
                 for _fid, pts in resolved.gates:
                     if point_in_polygon(px, py, pts):
-                        fresh = (cam_path, pid) not in self._gate_seen
-                        gate_hits.append((cam_path, pid, fresh))
+                        sp_here = t.get("store_person_id")
+                        vkey: tuple = (
+                            ("sp", resolved.store_id, sp_here)
+                            if isinstance(sp_here, int)
+                            else ("cam", cam_path, pid)
+                        )
+                        fresh = vkey not in self._gate_seen
+                        gate_hits.append((vkey, fresh))
                         break
 
         if not pending and not present_pids:
@@ -540,11 +564,11 @@ class FootfallAggregator:
             for key, n in pending:
                 self._buf[key] = self._buf.get(key, 0) + n
             # Count fresh gate crossings, refresh last-seen for all in-zone tracks.
-            for cam, pid, fresh in gate_hits:
-                self._gate_seen[(cam, pid)] = now
+            for gkey, fresh in gate_hits:
+                self._gate_seen[gkey] = now
                 if fresh:
-                    vkey = (resolved.store_id, cam, hour)
-                    self._visits[vkey] = self._visits.get(vkey, 0) + 1
+                    ckey = (resolved.store_id, cam_path, hour)
+                    self._visits[ckey] = self._visits.get(ckey, 0) + 1
             # Dwell presence: extend (or open) each visible track's span.
             for pid in present_pids:
                 pk = (cam_path, pid)
@@ -553,6 +577,19 @@ class FootfallAggregator:
                     self._presence[pk] = _Presence(now, resolved.store_id, hour)
                 else:
                     pres.last_mono = now
+            # Cross-camera visit spans: extend (or open) by store_person_id.
+            for pid, sp in sp_keys:
+                if sp is None:
+                    continue
+                pres = self._presence.get((cam_path, pid))
+                if pres is not None:
+                    pres.has_sp = True
+                skey = (resolved.store_id, sp)
+                span = self._sp_presence.get(skey)
+                if span is None:
+                    self._sp_presence[skey] = [now, now, hour]
+                else:
+                    span[1] = now
             # Stamp the walker's demographics onto their presence (path colour).
             for pid, gender, age_band in demo_hits:
                 pres = self._presence.get((cam_path, pid))
@@ -634,8 +671,21 @@ class FootfallAggregator:
                                 p.age_band,
                             )
                         )
+            if p.has_sp:
+                continue  # its dwell is carried by the cross-camera span
             dwell_ms = int((p.last_mono - p.first_mono) * 1000)
             dkey = (p.store_id, k[0], p.hour)
+            bucket = self._dwell_buf.get(dkey)
+            if bucket is None:
+                self._dwell_buf[dkey] = [1, dwell_ms]
+            else:
+                bucket[0] += 1
+                bucket[1] += dwell_ms
+        sp_stale = [k for k, s in self._sp_presence.items() if now - s[1] >= _SP_TTL]
+        for k in sp_stale:
+            first, last, hour0 = self._sp_presence.pop(k)
+            dwell_ms = int((last - first) * 1000)
+            dkey = (k[0], "__store__", hour0)
             bucket = self._dwell_buf.get(dkey)
             if bucket is None:
                 self._dwell_buf[dkey] = [1, dwell_ms]
