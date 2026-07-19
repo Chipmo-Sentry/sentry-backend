@@ -284,6 +284,7 @@ class _Presence:
         "gender",
         "age_band",
         "has_sp",
+        "is_staff",
     )
 
     def __init__(self, first_mono: float, store_id: UUID, hour: datetime) -> None:
@@ -303,6 +304,10 @@ class _Presence:
         # True once the track carried a store_person_id — its dwell then lives
         # in the cross-camera span, not the per-camera fragment.
         self.has_sp = False
+        # Staff (badge lock on the node) — the track's remaining samples are
+        # skipped AND anything banked pre-lock (path, dwell) is discarded on
+        # prune, so staff never leak into visitor analytics.
+        self.is_staff = False
 
 
 def _demo_bucket(track: dict[str, Any]) -> tuple[str, str] | None:
@@ -429,6 +434,10 @@ class FootfallAggregator:
         # more than _GATE_TTL it's forgotten, so a genuine re-entry recounts.
         self._gate_seen: dict[tuple, float] = {}
         self._gate_last_prune = time.monotonic()
+        # vkey → the _visits bucket it incremented, kept until flush/TTL so a
+        # LATE staff lock (badge confirms seconds after the door crossing) can
+        # retro-cancel the visit while it's still buffered.
+        self._visit_credit: dict[tuple, tuple[UUID, str, datetime]] = {}
         # (camera_id, person_id) → active presence span (dwell-time, F3+).
         self._presence: dict[tuple[str, int], _Presence] = {}
         # (store_id, store_person_id) → cross-camera visit span [first, last,
@@ -525,9 +534,21 @@ class FootfallAggregator:
         track_pts: list[tuple[int, float, float]] = []
         # (pid, gender, age_band) for demographics counting (F5).
         demo_hits: list[tuple[int, str, str]] = []
+        # (pid|None, sp|None) of staff tracks this frame — they contribute to NO
+        # accumulator, and anything credited before the badge locked (visit,
+        # path, dwell) is retro-cancelled below.
+        staff_marks: list[tuple[int | None, int | None]] = []
         for t in tracks:
             pid = t.get("person_id")
             sp = t.get("store_person_id")
+            if t.get("is_staff") is True:
+                staff_marks.append(
+                    (
+                        pid if isinstance(pid, int) else None,
+                        sp if isinstance(sp, int) else None,
+                    )
+                )
+                continue
             if isinstance(pid, int):
                 present_pids.append(pid)
                 # Cross-camera identity for visit dedup + true visit dwell:
@@ -568,10 +589,31 @@ class FootfallAggregator:
                         gate_hits.append((vkey, fresh))
                         break
 
-        if not pending and not present_pids:
+        if not pending and not present_pids and not staff_marks:
             return
 
         async with self._lock:
+            # Staff first: retro-cancel what the track earned before its badge
+            # locked, mark/clear its presences, and keep its gate key deduped
+            # so lingering in the doorway can't count later.
+            for spid, ssp in staff_marks:
+                vkey: tuple | None = (
+                    ("sp", resolved.store_id, ssp)
+                    if ssp is not None
+                    else (("cam", cam_path, spid) if spid is not None else None)
+                )
+                if vkey is not None:
+                    self._gate_seen[vkey] = now
+                    ckey0 = self._visit_credit.pop(vkey, None)
+                    if ckey0 is not None and self._visits.get(ckey0, 0) > 0:
+                        self._visits[ckey0] -= 1
+                if spid is not None:
+                    pres0 = self._presence.get((cam_path, spid))
+                    if pres0 is not None and not pres0.is_staff:
+                        pres0.is_staff = True
+                        pres0.path.clear()
+                if ssp is not None:
+                    self._sp_presence.pop((resolved.store_id, ssp), None)
             for key, n in pending:
                 self._buf[key] = self._buf.get(key, 0) + n
             # Count fresh gate crossings, refresh last-seen for all in-zone tracks.
@@ -580,6 +622,7 @@ class FootfallAggregator:
                 if fresh:
                     ckey = (resolved.store_id, cam_path, hour)
                     self._visits[ckey] = self._visits.get(ckey, 0) + 1
+                    self._visit_credit[gkey] = ckey
             # Dwell presence: extend (or open) each visible track's span.
             for pid in present_pids:
                 pk = (cam_path, pid)
@@ -666,6 +709,8 @@ class FootfallAggregator:
         stale = [k for k, p in self._presence.items() if now - p.last_mono >= _PRESENCE_TTL]
         for k in stale:
             p = self._presence.pop(k)
+            if p.is_staff:
+                continue  # staff: no path, no dwell — never a visitor statistic
             if len(p.path) >= _PATH_MIN_SAVED_POINTS:
                 walls = self._store_walls.get(p.store_id) or []
                 for part in _split_path(p.path, walls):
@@ -713,6 +758,7 @@ class FootfallAggregator:
         stale = [k for k, seen in self._gate_seen.items() if now - seen >= _GATE_TTL]
         for k in stale:
             del self._gate_seen[k]
+            self._visit_credit.pop(k, None)
         # Same TTL model for demographics dedup — prune together.
         demo_stale = [k for k, seen in self._demo_seen.items() if now - seen >= _GATE_TTL]
         for k in demo_stale:
@@ -766,6 +812,9 @@ class FootfallAggregator:
         demo_snapshot = self._demo_buf
         self._buf = {}
         self._visits = {}
+        # Flushed visits are in the DB — a late staff lock can no longer cancel
+        # them, so the credit map resets with the buffer it pointed into.
+        self._visit_credit = {}
         self._dwell_buf = {}
         self._flow_buf = {}
         self._demo_buf = {}

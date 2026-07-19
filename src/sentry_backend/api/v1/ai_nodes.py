@@ -42,6 +42,7 @@ def _config(node: AiNode) -> AiNodeConfig:
         scan_interval_sec=node.scan_interval_sec,
         frames_per_clip=node.frames_per_clip,
         frame_max_dim=node.frame_max_dim,
+        staff_badge_color=node.staff_badge_color,
     )
 
 

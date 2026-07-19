@@ -759,6 +759,7 @@ async def update_ai_node(
         scan_interval_sec=body.scan_interval_sec,
         frames_per_clip=body.frames_per_clip,
         frame_max_dim=body.frame_max_dim,
+        staff_badge_color=body.staff_badge_color,
     )
     return AiNodePublic.model_validate(node)
 

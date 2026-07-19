@@ -32,6 +32,7 @@ from sentry_backend.schemas.ai_node import (
     parse_camera_health,
     parse_hls_base,
     parse_served_paths,
+    parse_whep_base,
 )
 from sentry_backend.security import decode_user_token
 
@@ -94,6 +95,27 @@ async def _node_hls_base(db: AsyncSession, path: str) -> str | None:
             return base  # redirectable — the best case, take it immediately
         http_fallback = http_fallback or base
     return http_fallback
+
+
+async def node_whep_base(db: AsyncSession, path: str) -> str | None:
+    """The WHEP (WebRTC egress) base of the online node serving `path`.
+
+    HTTPS only: the app is served over HTTPS, so the browser blocks a WHEP
+    handshake to an http:// base as mixed content — and unlike HLS, WebRTC
+    can't be proxied through the backend. No usable base → the frontend simply
+    stays on its HLS fallback. In practice this means the node must report its
+    cloudflared WHEP hostname via MEDIAMTX_PUBLIC_WHEP_BASE."""
+    for node in await ai_node_repo.list_nodes(db):
+        if not _node_online(node):
+            continue
+        cams = parse_camera_health(node.telemetry) or []
+        served = parse_served_paths(node.telemetry)
+        if not (any(c.camera_id == path for c in cams) or path in served):
+            continue
+        base = parse_whep_base(node.telemetry)
+        if base and base.startswith("https://"):
+            return base
+    return None
 
 
 # The agent's reported tunnel base is only valid while it's heart-beating (the

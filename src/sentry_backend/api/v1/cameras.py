@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.api.v1.live_proxy import node_whep_base
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.tenancy import (
     get_current_organization_id,
@@ -118,10 +119,14 @@ async def get_stream_token(
             detail="Энэ камерт шууд дамжуулалтын зам тохируулаагүй байна.",
         )
     token = create_stream_token(cam.mediamtx_path)
+    whep_base = await node_whep_base(db, cam.mediamtx_path)
     return StreamTokenResponse(
         token=token,
         expires_in=get_settings().stream_token_ttl_sec,
         hls_url=f"/api/v1/live/{cam.mediamtx_path}/hls/index.m3u8?jwt={token}",
+        whep_url=(
+            f"{whep_base}/{cam.mediamtx_path}/whep?jwt={token}" if whep_base else None
+        ),
     )
 
 

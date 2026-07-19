@@ -223,6 +223,7 @@ async def update_node(
     scan_interval_sec: float | None = None,
     frames_per_clip: int | None = None,
     frame_max_dim: int | None = None,
+    staff_badge_color: str | None = None,
 ) -> AiNode:
     if name is not None:
         node.name = name
@@ -246,5 +247,9 @@ async def update_node(
         node.frames_per_clip = frames_per_clip
     if frame_max_dim is not None:
         node.frame_max_dim = frame_max_dim
+    if staff_badge_color is not None:
+        # Empty string = explicit clear (staff identification off); the schema
+        # uses None for "leave unchanged", so "" is the only way to disable.
+        node.staff_badge_color = staff_badge_color.strip().lower() or None
     await db.flush()
     return node

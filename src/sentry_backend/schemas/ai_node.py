@@ -49,6 +49,9 @@ class AiNodeConfig(BaseModel):
     scan_interval_sec: float = 3.0
     frames_per_clip: int = 1
     frame_max_dim: int = 320
+    # Staff badge color (named color or #rrggbb). None → staff identification
+    # off on the node. Set by superadmin once the owner picks the lanyard color.
+    staff_badge_color: str | None = None
 
 
 class AiNodePairResult(BaseModel):
@@ -121,6 +124,20 @@ def parse_hls_base(telemetry: str | None) -> str | None:
     return base if isinstance(base, str) and base.startswith(("http://", "https://")) else None
 
 
+def parse_whep_base(telemetry: str | None) -> str | None:
+    """The node's externally-reachable MediaMTX WHEP base (WebRTC egress) from
+    its telemetry JSON — handed to the browser so live view can play sub-second
+    WebRTC instead of HLS. None for old nodes / no telemetry."""
+    if not telemetry:
+        return None
+    try:
+        data = json.loads(telemetry)
+    except ValueError:
+        return None
+    base = data.get("mediamtx_whep_base") if isinstance(data, dict) else None
+    return base if isinstance(base, str) and base.startswith(("http://", "https://")) else None
+
+
 class ComponentUsage(BaseModel):
     """Per-component CPU/RAM (sentry-ai / Ollama / MediaMTX / Tunnel) — the
     resource breakdown shown in the dashboard. Stored in telemetry JSON."""
@@ -171,6 +188,10 @@ class AiNodeHeartbeat(BaseModel):
     # derived from the node's vast.ai env. The backend proxies live HLS to it over
     # HTTPS so the frontend has no mixed-content / hardcoded-ephemeral-port issue.
     mediamtx_hls_base: str | None = Field(default=None, max_length=200)
+    # Externally-reachable MediaMTX WHEP base (WebRTC egress, port 8889) — same
+    # derivation rules as the HLS base. Handed to the browser via the stream-token
+    # endpoint so live view plays sub-second WebRTC with HLS as fallback.
+    mediamtx_whep_base: str | None = Field(default=None, max_length=200)
     # MediaMTX paths the node is currently serving (ready streams) — keeps the
     # node↔camera link + HLS proxy working in edge-first mode where the node runs
     # no analysis worker (so no per-camera health). docs/32 P3.
@@ -488,3 +509,6 @@ class AiNodeUpdate(BaseModel):
     scan_interval_sec: float | None = Field(default=None, ge=0.5, le=60.0)
     frames_per_clip: int | None = Field(default=None, ge=1, le=8)
     frame_max_dim: int | None = Field(default=None, ge=160, le=1280)
+    # Staff badge color (named color or #rrggbb). Empty string clears it (staff
+    # identification off); None = leave unchanged.
+    staff_badge_color: str | None = Field(default=None, max_length=16)

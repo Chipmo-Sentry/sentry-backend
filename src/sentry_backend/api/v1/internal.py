@@ -312,6 +312,11 @@ class LiveTrack(BaseModel):
     # strips undeclared keys, so they must be declared to reach the aggregator.
     gender: str | None = Field(default=None, max_length=16)
     age_band: str | None = Field(default=None, max_length=16)
+    # Staff identification (badge-color + VLM lock on the node). Declared or
+    # extra="ignore" strips it: the browser needs it to recolor the box, the
+    # aggregator to exclude staff from visitor KPIs/paths/heatmap. Alerts are
+    # NOT filtered on it — internal theft stays monitored.
+    is_staff: bool = False
 
 
 class LiveItem(BaseModel):

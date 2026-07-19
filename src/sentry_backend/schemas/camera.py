@@ -96,6 +96,10 @@ class StreamTokenResponse(BaseModel):
     # (avoids mixed-content + the node's ephemeral address). The frontend prefers
     # this over any build-time MediaMTX base.
     hls_url: str | None = None
+    # Absolute HTTPS WHEP URL on the serving node (jwt appended) — sub-second
+    # WebRTC playback. None when the node reports no HTTPS WHEP base; the
+    # frontend then stays on the HLS path above.
+    whep_url: str | None = None
 
 
 class CameraPublic(BaseModel):

@@ -59,6 +59,10 @@ class AiNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     frames_per_clip: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     # Max edge (px) each VLM keyframe is resized to before inference.
     frame_max_dim: Mapped[int] = mapped_column(Integer, default=320, nullable=False)
+    # Staff badge color (named color or #rrggbb) the node's staff identifier
+    # matches on the chest region. NULL → staff identification off. Set once
+    # the owner picks the lanyard color for their staff.
+    staff_badge_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Live-breach topology — the SINGLE source of truth for who creates breach
     # alerts (ADR-0026 central control, like `provider`). The node polls this and
     # hot-applies it; nothing on the node decides it locally any more, so the old
