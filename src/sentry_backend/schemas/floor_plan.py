@@ -36,6 +36,10 @@ class FloorWall(BaseModel):
     """A wall / fixture outline polyline in PLAN coordinates (not 0-1)."""
 
     points: list[tuple[float, float]]
+    # Physical wall height in metres (agent 3D-calibration feature; default 2.8
+    # on the agent side). Was silently stripped here before this field existed —
+    # declared so it persists and the 3D plan view can extrude real heights.
+    height_m: float | None = Field(default=None, ge=0, le=20)
 
     @field_validator("points")
     @classmethod
@@ -56,6 +60,10 @@ class FloorFixture(BaseModel):
     # zone analytics instead of the generic type label.
     label: str | None = Field(default=None, max_length=MAX_FIXTURE_LABEL)
     points: list[tuple[float, float]]
+    # Physical fixture height in metres (per-type agent defaults: shelf 1.8,
+    # fridge 2.0, checkout 1.0, mannequin 1.7, exit/furniture 0) — operator
+    # overridable in the editor; drives the 3D plan view extrusion.
+    height_m: float | None = Field(default=None, ge=0, le=20)
 
     @field_validator("points")
     @classmethod
