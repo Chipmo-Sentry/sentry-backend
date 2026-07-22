@@ -116,6 +116,9 @@ class FloorCamera(BaseModel):
     # before applying H⁻¹. None/0 = pre-k1 calibration, H works on raw coords.
     k1: float | None = None
     reproj_err: float | None = None
+    # solvePnP mount height in metres (agent v0.7.102 3D calibration) — the 3D
+    # plan views hang the camera at its MEASURED height. None = pose unsolved.
+    cam_h_m: float | None = Field(default=None, ge=0, le=20)
     calib_points: list[CalibPoint] | None = Field(default=None, max_length=MAX_CALIB_POINTS)
 
     @field_validator("homography")
