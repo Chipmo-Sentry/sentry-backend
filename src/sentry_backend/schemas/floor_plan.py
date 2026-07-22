@@ -28,6 +28,7 @@ FixtureType = Literal[
     "sofa",
     "chair",
     "door",
+    "exterior_door",
 ]
 
 # Plan units are METRES: the agent editor (v0.7.66+) fixes 1 plan-unit == 1 m,
