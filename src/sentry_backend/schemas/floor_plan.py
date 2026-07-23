@@ -100,6 +100,10 @@ class CalibPoint(BaseModel):
 
     image: tuple[float, float]
     plan: tuple[float, float]
+    # Elevated pair height in metres (agent v0.7.108 3D calibration: a point
+    # clicked on a wall / shelf top). None/0 = floor point. Excluded from the
+    # floor-plane homography agent-side; feeds the solvePnP pose.
+    h: float | None = Field(default=None, ge=0, le=20)
 
 
 class FloorCamera(BaseModel):
