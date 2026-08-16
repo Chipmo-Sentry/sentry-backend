@@ -31,6 +31,12 @@ class Store(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # AGENT_STREAM_PUSH_URL env. Editable from superadmin so a vast.ai instance
     # restart (new IP/port) can be fixed without a backend redeploy.
     agent_stream_push_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Named cloudflared tunnel for THIS store's agent (stable agent-direct video
+    # URL). token → `cloudflared tunnel run --token …` on the agent; hostname →
+    # the public HTTPS base it serves (e.g. "store1.chipmo.mn"). Both None →
+    # the agent falls back to an ephemeral quick tunnel. Superadmin-editable.
+    agent_tunnel_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    agent_tunnel_hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # docs/30 — top-down floor plan authored in the agent-pc «Plan зураг» page:
     # {size, walls, fixtures[type], cameras[pos, dir_deg, homography, calib_points]}.
     # The plan is the SOURCE; per-camera Camera.zones are DERIVED from it (plan

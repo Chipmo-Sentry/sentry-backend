@@ -410,6 +410,8 @@ async def agent_stream_config(
         push_rtsp_base=push_base,
         publish_user=s.mediamtx_publish_user,
         publish_pass=s.mediamtx_publish_pass,
+        tunnel_token=store.agent_tunnel_token if store else None,
+        tunnel_hostname=store.agent_tunnel_hostname if store else None,
     )
 
 

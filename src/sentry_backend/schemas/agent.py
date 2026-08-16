@@ -127,3 +127,8 @@ class AgentStreamConfig(BaseModel):
     push_rtsp_base: str | None = None  # e.g. "rtsp://media.sentry.chipmo.mn:8554"
     publish_user: str | None = None
     publish_pass: str | None = None
+    # Named cloudflared tunnel for agent-direct video (stable hostname). Both
+    # set → the agent runs `cloudflared tunnel run --token …` and reports
+    # https://<hostname> in its heartbeat; unset → ephemeral quick tunnel.
+    tunnel_token: str | None = None
+    tunnel_hostname: str | None = None

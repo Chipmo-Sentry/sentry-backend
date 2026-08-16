@@ -83,6 +83,8 @@ async def update_store(
     timezone: str | None = None,
     telegram_chat_id: str | None = None,
     agent_stream_push_url: str | None = None,
+    agent_tunnel_token: str | None = None,
+    agent_tunnel_hostname: str | None = None,
 ) -> Store:
     if name is not None:
         store.name = name
@@ -96,6 +98,11 @@ async def update_store(
     if agent_stream_push_url is not None:
         # Empty string clears the override (falls back to the global env URL).
         store.agent_stream_push_url = agent_stream_push_url or None
+    if agent_tunnel_token is not None:
+        # Empty string clears → the agent falls back to a quick tunnel.
+        store.agent_tunnel_token = agent_tunnel_token or None
+    if agent_tunnel_hostname is not None:
+        store.agent_tunnel_hostname = agent_tunnel_hostname.strip().lower() or None
     await db.flush()
     return store
 

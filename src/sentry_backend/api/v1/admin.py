@@ -783,6 +783,8 @@ async def list_stores_admin(
             organization_name=org_name,
             camera_count=cam_n,
             agent_stream_push_url=store.agent_stream_push_url,
+            agent_tunnel_hostname=store.agent_tunnel_hostname,
+            agent_tunnel_token_set=bool(store.agent_tunnel_token),
         )
         for store, org_name, cam_n in rows
     ]
@@ -801,7 +803,13 @@ async def update_store_admin(
     store = await store_repo.get_store_any_org(db, store_id)
     if store is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
-    await store_repo.update_store(db, store, agent_stream_push_url=body.agent_stream_push_url)
+    await store_repo.update_store(
+        db,
+        store,
+        agent_stream_push_url=body.agent_stream_push_url,
+        agent_tunnel_token=body.agent_tunnel_token,
+        agent_tunnel_hostname=body.agent_tunnel_hostname,
+    )
     cam_n = await camera_repo.count_cameras_for_store(db, store.id)
     org = await org_repo.get_org(db, store.organization_id)
     return StoreAdminRow(
@@ -811,6 +819,8 @@ async def update_store_admin(
         organization_name=org.name if org else "",
         camera_count=cam_n,
         agent_stream_push_url=store.agent_stream_push_url,
+        agent_tunnel_hostname=store.agent_tunnel_hostname,
+        agent_tunnel_token_set=bool(store.agent_tunnel_token),
     )
 
 
