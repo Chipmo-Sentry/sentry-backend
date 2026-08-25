@@ -181,6 +181,10 @@ class ThresholdHandler:
                 risk = t.get("risk_pct")
                 if not isinstance(pid, int) or not isinstance(risk, (int, float)):
                     continue
+                if t.get("is_mannequin") is True:
+                    # A dummy can't shoplift — no risk episodes, no breaches. The
+                    # flag releases if the track actually moves; scoring resumes.
+                    continue
                 key = (cam_path, pid)
                 st = self._state.get(key)
                 if st is None:

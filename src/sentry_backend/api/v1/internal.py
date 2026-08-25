@@ -317,6 +317,9 @@ class LiveTrack(BaseModel):
     # aggregator to exclude staff from visitor KPIs/paths/heatmap. Alerts are
     # NOT filtered on it — internal theft stays monitored.
     is_staff: bool = False
+    # Node-side mannequin filter (drawn zone / long stillness) — excluded from
+    # visitor analytics and breach tracking downstream.
+    is_mannequin: bool = False
 
 
 class LiveItem(BaseModel):

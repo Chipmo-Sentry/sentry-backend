@@ -556,6 +556,12 @@ class FootfallAggregator:
         for t in tracks:
             pid = t.get("person_id")
             sp = t.get("store_person_id")
+            # Mannequins (node-side filter: drawn zone / long stillness) are not
+            # visitors — no footfall, no dwell, no paths, no demographics. Unlike
+            # staff there's nothing to retro-cancel: the flag releases only when
+            # the track MOVES, at which point it starts counting normally.
+            if t.get("is_mannequin") is True:
+                continue
             if t.get("is_staff") is True:
                 staff_marks.append(
                     (
