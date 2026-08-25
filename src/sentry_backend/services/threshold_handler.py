@@ -359,7 +359,7 @@ class ThresholdHandler:
                     from sentry_backend.services.footfall_aggregator import project_foot_to_plan
 
                     proj = project_foot_to_plan(
-                        store.floor_plan, s.cam_path, s.peak_foot[0], s.peak_foot[1]
+                        store.floor_plan, s.cam_path, s.peak_foot[0], s.peak_foot[1], clip=False
                     )
                     if proj is not None:
                         (px, py), (sx, sy) = proj

@@ -86,12 +86,20 @@ def project_foot_to_plan(
     camera_id: str,
     foot_nx: float,
     foot_ny: float,
+    *,
+    clip: bool = True,
 ) -> tuple[tuple[float, float], tuple[float, float]] | None:
     """Map a normalized (0-1) camera-image foot point to ABSOLUTE plan coords.
 
     Returns ((plan_x, plan_y), (size_x, size_y)) clipped into the plan bounds, or
     None when the camera isn't placed on the plan. Absolute coords let callers do
     point-in-polygon against plan fixtures (F3 gate counting) as well as gridding.
+
+    `clip=False` instead REJECTS points that land meaningfully outside the plan
+    (returns None): near the image horizon the homography extrapolates without
+    bound, and clipping such a point pins it to a plan edge in a room the camera
+    can't even see — fine for a dense aggregate heatmap, misleading for
+    individual incident markers (risk analytics).
     """
     if not plan:
         return None
@@ -147,6 +155,13 @@ def project_foot_to_plan(
         radius = _FALLBACK_RADIUS_FRAC * min(sx, sy)
         px = cxp + (foot_nx - 0.5) * radius
         py = cyp + (foot_ny - 0.5) * radius
+
+    if not clip:
+        # Tolerate a small overshoot (slightly-off homography) but reject the
+        # wild horizon extrapolations outright.
+        margin = 0.05 * min(sx, sy)
+        if not (-margin <= px <= sx + margin and -margin <= py <= sy + margin):
+            return None
 
     # Clip into bounds rather than dropping — a slightly-off homography
     # shouldn't silently lose every edge point.
