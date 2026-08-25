@@ -89,6 +89,10 @@ class _EpisodeSummary:
     behavior_scores: dict[str, float]
     alerted: bool
     duration_sec: float
+    # Normalized camera-image foot point at the episode's PEAK risk — projected
+    # onto the floor plan at summary time so the risk analytics can heatmap
+    # WHERE incidents cluster, not just when.
+    peak_foot: tuple[float, float] | None = None
 
 
 @dataclass(slots=True)
@@ -118,6 +122,9 @@ class _PersonState:
     last_behavior_scores: dict[str, float] = field(default_factory=dict)
     last_behavior_offsets: dict[str, float] = field(default_factory=dict)
     episode_started_ms: int | None = None
+    # Foot point (normalized image coords) captured when episode_peak_risk_pct
+    # was last raised — i.e. where the person stood at their riskiest moment.
+    peak_foot: tuple[float, float] | None = None
 
 
 class ThresholdHandler:
@@ -182,6 +189,18 @@ class ThresholdHandler:
                     self._state[key] = st
                 st.risk_pct = float(risk)
                 st.peak_risk_pct = max(st.peak_risk_pct, st.risk_pct)
+                if st.risk_pct >= st.episode_peak_risk_pct and st.risk_pct > 0:
+                    # New episode high-water mark → remember WHERE they stood
+                    # (normalized bottom-center of the box = foot point).
+                    box = t.get("box")
+                    if isinstance(box, (list, tuple)) and len(box) == 4:
+                        try:
+                            st.peak_foot = (
+                                (float(box[0]) + float(box[2])) / 2.0,
+                                float(box[3]),
+                            )
+                        except (TypeError, ValueError):
+                            pass
                 st.episode_peak_risk_pct = max(st.episode_peak_risk_pct, st.risk_pct)
                 st.last_seen = now
                 # Remember the latest fired sequence rules (RAG query context).
@@ -310,6 +329,7 @@ class ThresholdHandler:
                         behavior_scores=dict(st.last_behavior_scores),
                         alerted=st.alerted,
                         duration_sec=max(0.0, st.last_seen - st.first_seen),
+                        peak_foot=st.peak_foot,
                     )
                 )
             del self._state[k]
@@ -330,6 +350,21 @@ class ThresholdHandler:
                     return
                 store = await db.get(Store, camera.store_id)
                 org_id = store.organization_id if store else None
+                # Project the peak-risk foot point onto the floor plan (normalized
+                # 0-1) so risk analytics can heatmap incident locations. None when
+                # the camera isn't calibrated on the plan — the analytics fall
+                # back to camera-level grouping for such episodes.
+                plan_pos: list[float] | None = None
+                if s.peak_foot is not None and store is not None and store.floor_plan:
+                    from sentry_backend.services.footfall_aggregator import project_foot_to_plan
+
+                    proj = project_foot_to_plan(
+                        store.floor_plan, s.cam_path, s.peak_foot[0], s.peak_foot[1]
+                    )
+                    if proj is not None:
+                        (px, py), (sx, sy) = proj
+                        if sx > 0 and sy > 0:
+                            plan_pos = [round(px / sx, 4), round(py / sy, 4)]
                 level = _risk_level(s.peak_risk_pct)
                 severity = {
                     "MEDIUM": EventSeverity.info,
@@ -358,6 +393,7 @@ class ThresholdHandler:
                         "behavior_scores": s.behavior_scores,
                         "alerted": s.alerted,
                         "duration_sec": round(s.duration_sec, 1),
+                        "plan_pos": plan_pos,
                     },
                 )
         except Exception:  # noqa: BLE001 — summary logging must never disrupt L5

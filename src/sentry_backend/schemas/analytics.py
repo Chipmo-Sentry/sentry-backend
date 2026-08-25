@@ -175,3 +175,51 @@ class PeakMatrix(BaseModel):
     timezone: str
     max_entries: int
     cells: list[PeakCell] = Field(default_factory=list)
+
+
+class RiskPoint(BaseModel):
+    """One risk episode's peak-moment location on the plan (normalized 0-1)."""
+
+    x: float
+    y: float
+    pct: float
+
+
+class RiskEpisodeRow(BaseModel):
+    """One finished risk episode for the analytics list."""
+
+    ts: datetime
+    camera_name: str
+    peak_risk_pct: float
+    level: str
+    behaviors: list[str] = Field(default_factory=list)
+    alerted: bool = False
+    duration_sec: float = 0.0
+
+
+class RiskCell(BaseModel):
+    """Risk episodes in one (weekday, hour) slot. dow 1-7 = Mon-Sun (local)."""
+
+    dow: int
+    hour: int
+    count: int
+
+
+class RiskSummary(BaseModel):
+    """Store risk analytics over a window: WHERE incidents cluster on the plan
+    (points), WHEN they happen (weekday×hour cells), WHAT fires (top behaviors)
+    and the most recent episodes — built from risk_episode activity-log rows the
+    threshold handler has been writing all along."""
+
+    window_from: datetime
+    window_to: datetime
+    timezone: str
+    total: int
+    alerted: int
+    prev_total: int  # same-length window immediately before → trend arrow
+    max_cell: int
+    cells: list[RiskCell] = Field(default_factory=list)
+    points: list[RiskPoint] = Field(default_factory=list)
+    top_behaviors: list[DemographicSlice] = Field(default_factory=list)
+    top_cameras: list[DemographicSlice] = Field(default_factory=list)
+    recent: list[RiskEpisodeRow] = Field(default_factory=list)
