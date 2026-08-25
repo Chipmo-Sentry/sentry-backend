@@ -2,7 +2,7 @@
 
 import contextlib
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -454,12 +454,16 @@ async def get_store_risk(
     db: Annotated[AsyncSession, Depends(get_db)],
     org_id: Annotated[UUID, Depends(get_current_organization_id)],
     hours: Annotated[int, Query(ge=1, le=_MAX_HOURS)] = 168,
+    min_pct: Annotated[float, Query(ge=0, le=100)] = 25.0,
 ) -> RiskSummary:
     """Risk-episode analytics over the window (default 7 days): plan heat points
     (episodes whose peak location projected onto the plan), weekday×hour timing
     cells, top firing behaviors/cameras, and the latest episodes. Sourced from
-    the risk_episode activity-log rows the threshold handler writes for every
-    track whose risk entered the yellow band — alert or not."""
+    the risk_episode activity-log rows the threshold handler writes.
+
+    Aggregated in SQL — a busy store logs thousands of episodes per day, so
+    fetching rows would silently truncate long windows. `min_pct` (default 25 =
+    the HIGH band) filters out yellow-band noise; pass 0 for everything."""
     from zoneinfo import ZoneInfo
 
     from sentry_backend.db.models.event_log import EventLog, EventType
@@ -473,109 +477,147 @@ async def get_store_risk(
     prev_start = start - timedelta(hours=hours)
     tz_name = store.timezone or "UTC"
     try:
-        tz = ZoneInfo(tz_name)
+        ZoneInfo(tz_name)
     except Exception:  # noqa: BLE001 — a bad stored tz must not 500 analytics
-        tz, tz_name = ZoneInfo("UTC"), "UTC"
+        tz_name = "UTC"
 
-    from sqlalchemy import func, select
+    from sqlalchemy import Float, cast, func, select, true
 
-    rows = (
+    pct_expr = cast(EventLog.detail["peak_risk_pct"].astext, Float)
+    base = (
+        (EventLog.store_id == store_id)
+        & (EventLog.event_type == EventType.risk_episode)
+        & (func.coalesce(pct_expr, 0.0) >= min_pct)
+    )
+    in_window = base & (EventLog.created_at >= start)
+
+    total = (
+        await db.execute(select(func.count()).select_from(EventLog).where(in_window))
+    ).scalar() or 0
+    alerted_n = (
+        await db.execute(
+            select(func.count())
+            .select_from(EventLog)
+            .where(in_window, EventLog.detail["alerted"].astext == "true")
+        )
+    ).scalar() or 0
+    prev_total = (
+        await db.execute(
+            select(func.count())
+            .select_from(EventLog)
+            .where(base, EventLog.created_at >= prev_start, EventLog.created_at < start)
+        )
+    ).scalar() or 0
+
+    # Weekday × hour cells in STORE-local time, aggregated by Postgres.
+    local_ts = func.timezone(tz_name, EventLog.created_at)
+    dow_expr = cast(func.extract("isodow", local_ts), Float)
+    hour_expr = cast(func.extract("hour", local_ts), Float)
+    cell_rows = (
+        await db.execute(
+            select(dow_expr, hour_expr, func.count()).where(in_window).group_by(dow_expr, hour_expr)
+        )
+    ).all()
+    cell_counts = {(int(d_), int(h)): int(n) for d_, h, n in cell_rows}
+
+    # Top behaviors: unnest the JSONB behaviors array server-side.
+    beh = func.jsonb_array_elements_text(EventLog.detail["behaviors"]).column_valued("beh")
+    beh_rows = (
+        await db.execute(
+            select(beh, func.count())
+            .select_from(EventLog)
+            .where(in_window, func.jsonb_typeof(EventLog.detail["behaviors"]) == "array")
+            .group_by(beh)
+            .order_by(func.count().desc())
+            .limit(8)
+        )
+    ).all()
+
+    from sentry_backend.db.models.camera import Camera
+
+    cam_names = {
+        c.id: c.name
+        for c in (await db.execute(select(Camera).where(Camera.store_id == store_id)))
+        .scalars()
+        .all()
+    }
+    cam_rows2 = (
+        await db.execute(
+            select(EventLog.camera_id, func.count())
+            .where(in_window)
+            .group_by(EventLog.camera_id)
+            .order_by(func.count().desc())
+            .limit(8)
+        )
+    ).all()
+
+    # Plan heat points: newest located episodes only (bounded — the layer draws
+    # dots, a few hundred is already a dense picture).
+    point_rows = (
         (
             await db.execute(
                 select(EventLog)
-                .where(
-                    EventLog.store_id == store_id,
-                    EventLog.event_type == EventType.risk_episode,
-                    EventLog.created_at >= start,
-                )
+                .where(in_window, EventLog.detail["plan_pos"].astext.isnot(None), true())
                 .order_by(EventLog.created_at.desc())
-                .limit(5000)
+                .limit(1500)
             )
         )
         .scalars()
         .all()
     )
-    prev_total = (
-        await db.execute(
-            select(func.count())
-            .select_from(EventLog)
-            .where(
-                EventLog.store_id == store_id,
-                EventLog.event_type == EventType.risk_episode,
-                EventLog.created_at >= prev_start,
-                EventLog.created_at < start,
-            )
-        )
-    ).scalar() or 0
-
-    from sentry_backend.db.models.camera import Camera
-
-    cam_rows = (
-        (await db.execute(select(Camera).where(Camera.store_id == store_id))).scalars().all()
-    )
-    cam_names = {c.id: c.name for c in cam_rows}
-
-    cell_counts: dict[tuple[int, int], int] = {}
-    beh_counts: dict[str, int] = {}
-    cam_counts: dict[str, int] = {}
     points: list[RiskPoint] = []
-    recent: list[RiskEpisodeRow] = []
-    alerted_n = 0
-    for r in rows:
+    for r in point_rows:
         d = r.detail or {}
-        local = r.created_at.astimezone(tz)
-        key = (local.isoweekday(), local.hour)
-        cell_counts[key] = cell_counts.get(key, 0) + 1
-        for b in d.get("behaviors") or []:
-            beh_counts[str(b)] = beh_counts.get(str(b), 0) + 1
-        cam_name = cam_names.get(r.camera_id, "?") if r.camera_id else "?"
-        cam_counts[cam_name] = cam_counts.get(cam_name, 0) + 1
-        if d.get("alerted"):
-            alerted_n += 1
         pos = d.get("plan_pos")
         if isinstance(pos, list) and len(pos) == 2:
             with contextlib.suppress(TypeError, ValueError):
                 points.append(
                     RiskPoint(
-                        x=float(pos[0]),
-                        y=float(pos[1]),
-                        pct=float(d.get("peak_risk_pct") or 0.0),
+                        x=float(pos[0]), y=float(pos[1]), pct=float(d.get("peak_risk_pct") or 0.0)
                     )
                 )
-        if len(recent) < 20:
-            recent.append(
-                RiskEpisodeRow(
-                    ts=r.created_at,
-                    camera_name=cam_name,
-                    peak_risk_pct=float(d.get("peak_risk_pct") or 0.0),
-                    level=str(d.get("level") or "MEDIUM"),
-                    behaviors=[str(b) for b in (d.get("behaviors") or [])],
-                    alerted=bool(d.get("alerted")),
-                    duration_sec=float(d.get("duration_sec") or 0.0),
-                )
+
+    recent_rows = (
+        (
+            await db.execute(
+                select(EventLog).where(in_window).order_by(EventLog.created_at.desc()).limit(20)
             )
+        )
+        .scalars()
+        .all()
+    )
+    recent = [
+        RiskEpisodeRow(
+            ts=r.created_at,
+            camera_name=cam_names.get(r.camera_id, "?") if r.camera_id else "?",
+            peak_risk_pct=float((r.detail or {}).get("peak_risk_pct") or 0.0),
+            level=str((r.detail or {}).get("level") or "MEDIUM"),
+            behaviors=[str(b) for b in ((r.detail or {}).get("behaviors") or [])],
+            alerted=bool((r.detail or {}).get("alerted")),
+            duration_sec=float((r.detail or {}).get("duration_sec") or 0.0),
+        )
+        for r in recent_rows
+    ]
 
-    total = len(rows)
-
-    def top(counts: dict[str, int]) -> list[DemographicSlice]:
-        return [
-            DemographicSlice(key=k, count=n, share=(n / total) if total else 0.0)
-            for k, n in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:8]
-            if n > 0
-        ]
+    def top(counts: list[tuple[Any, int]], name: bool = False) -> list[DemographicSlice]:
+        out = []
+        for k, n in counts:
+            label = (cam_names.get(k, "?") if name else str(k)) if k is not None else "?"
+            out.append(DemographicSlice(key=label, count=int(n), share=(n / total) if total else 0))
+        return out
 
     return RiskSummary(
         window_from=start,
         window_to=end,
         timezone=tz_name,
-        total=total,
-        alerted=alerted_n,
+        total=int(total),
+        alerted=int(alerted_n),
         prev_total=int(prev_total),
         max_cell=max(cell_counts.values(), default=0),
         cells=[RiskCell(dow=d_, hour=h, count=n) for (d_, h), n in sorted(cell_counts.items())],
         points=points,
-        top_behaviors=top(beh_counts),
-        top_cameras=top(cam_counts),
+        top_behaviors=top([(k, n) for k, n in beh_rows]),
+        top_cameras=top([(k, n) for k, n in cam_rows2], name=True),
         recent=recent,
     )
 
