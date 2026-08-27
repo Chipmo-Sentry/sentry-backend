@@ -155,6 +155,12 @@ class Settings(BaseSettings):
     agent_stream_push_url: str | None = None
     mediamtx_publish_user: str | None = None
     mediamtx_publish_pass: str | None = None
+    # WHEP path suffix for the low-bitrate WebRTC variants ("_lo"). The node
+    # NVENC-re-encodes each camera to ~0.9Mbps/720p under <path>_lo because the
+    # full 2.4Mbps stream stutters over the lossy store→node internet path;
+    # WebRTC then plays the light variant while HLS keeps full quality. Empty →
+    # WHEP uses the original path (e.g. node and viewers on one LAN).
+    whep_low_suffix: str = ""
     # Per-camera read token (WHEP/HLS) TTL + the MediaMTX authHTTP shared secret.
     # stream_token_ttl_sec covers a viewing session (reconnects reuse the URL).
     # mediamtx_auth_secret, when set, must be sent by MediaMTX as the

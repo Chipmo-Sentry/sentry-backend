@@ -125,7 +125,9 @@ async def get_stream_token(
         expires_in=get_settings().stream_token_ttl_sec,
         hls_url=f"/api/v1/live/{cam.mediamtx_path}/hls/index.m3u8?jwt={token}",
         whep_url=(
-            f"{whep_base}/{cam.mediamtx_path}/whep?jwt={token}" if whep_base else None
+            f"{whep_base}/{cam.mediamtx_path}{get_settings().whep_low_suffix}/whep?jwt={token}"
+            if whep_base
+            else None
         ),
     )
 
