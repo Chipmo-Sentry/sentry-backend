@@ -135,6 +135,40 @@ def create_stream_token(mediamtx_path: str) -> str:
     )
 
 
+def create_livekit_token(room: str, identity: str) -> str | None:
+    """Subscribe-only LiveKit room-join token for one camera's viewing room.
+
+    LiveKit rooms are named after the camera's mediamtx_path, so the grant
+    confines the viewer to exactly the stream they own — same tenancy model as
+    create_stream_token. Signed with the LiveKit API secret (HS256, iss = API
+    key) per the LiveKit access-token spec. None when LiveKit is not configured.
+    """
+    settings = get_settings()
+    if not (settings.livekit_url and settings.livekit_api_key and settings.livekit_api_secret):
+        return None
+    now = _now_utc()
+    payload: dict[str, Any] = {
+        "iss": settings.livekit_api_key,
+        "sub": identity,
+        "name": identity,
+        "iat": int(now.timestamp()),
+        "nbf": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=settings.stream_token_ttl_sec)).timestamp()),
+        "video": {
+            "room": room,
+            "roomJoin": True,
+            "canSubscribe": True,
+            "canPublish": False,
+            "canPublishData": False,
+        },
+    }
+    return jwt.encode(
+        payload,
+        settings.livekit_api_secret.get_secret_value(),
+        algorithm="HS256",
+    )
+
+
 AGENT_TOKEN_TTL_DAYS = 365
 
 

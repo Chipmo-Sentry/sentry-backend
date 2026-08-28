@@ -1,7 +1,7 @@
 """Cameras router — org-scoped CRUD (via Store join)."""
 
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,7 @@ from sentry_backend.schemas.camera import (
     CameraUpdate,
     StreamTokenResponse,
 )
-from sentry_backend.security import create_stream_token
+from sentry_backend.security import create_livekit_token, create_stream_token
 from sentry_backend.services import live_provision
 from sentry_backend.services.billing.gating import SUSPENDED_DETAIL, org_billing_status
 from sentry_backend.services.billing.status import BillingStatus
@@ -120,6 +120,11 @@ async def get_stream_token(
         )
     token = create_stream_token(cam.mediamtx_path)
     whep_base = await node_whep_base(db, cam.mediamtx_path)
+    # Viewer identity must be unique per connection: LiveKit disconnects an
+    # older participant when a new one joins with the same identity.
+    livekit_token = create_livekit_token(
+        cam.mediamtx_path, f"viewer-{uuid4().hex[:12]}"
+    )
     return StreamTokenResponse(
         token=token,
         expires_in=get_settings().stream_token_ttl_sec,
@@ -129,6 +134,8 @@ async def get_stream_token(
             if whep_base
             else None
         ),
+        livekit_url=get_settings().livekit_url or None,
+        livekit_token=livekit_token,
     )
 
 

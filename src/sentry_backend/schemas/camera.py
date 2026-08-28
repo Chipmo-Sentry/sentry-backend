@@ -100,6 +100,11 @@ class StreamTokenResponse(BaseModel):
     # WebRTC playback. None when the node reports no HTTPS WHEP base; the
     # frontend then stays on the HLS path above.
     whep_url: str | None = None
+    # LiveKit SFU viewing (adaptive simulcast). When both are set the frontend
+    # prefers this over whep_url/hls_url; the token joins the camera's room
+    # (named by mediamtx_path) subscribe-only.
+    livekit_url: str | None = None
+    livekit_token: str | None = None
 
 
 class CameraPublic(BaseModel):

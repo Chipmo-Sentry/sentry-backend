@@ -161,6 +161,15 @@ class Settings(BaseSettings):
     # WebRTC then plays the light variant while HLS keeps full quality. Empty →
     # WHEP uses the original path (e.g. node and viewers on one LAN).
     whep_low_suffix: str = ""
+    # LiveKit SFU viewing (true ABR: simulcast + TWCC congestion control per
+    # viewer — the machinery a plain MediaMTX WHEP forward lacks). All three
+    # set → stream-token responses carry a livekit_url + join token and the
+    # frontend prefers that player. livekit_url is the browser-facing signalling
+    # origin (e.g. wss://whep.chipmo.mn); key/secret must match the node's
+    # livekit.yaml keys entry.
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: SecretStr | None = None
     # Per-camera read token (WHEP/HLS) TTL + the MediaMTX authHTTP shared secret.
     # stream_token_ttl_sec covers a viewing session (reconnects reuse the URL).
     # mediamtx_auth_secret, when set, must be sent by MediaMTX as the
