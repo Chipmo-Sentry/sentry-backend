@@ -419,12 +419,25 @@ async def get_store_zone_flow(
 
     top = sorted(net.items(), key=lambda kv: kv[1], reverse=True)[:_ZONE_FLOW_TOP_EDGES]
     used = {i for (a, b), _ in top for i in (a, b)}
+    # Gross in/out per zone across ALL edges (not just the top) — the summary
+    # chips must reflect the whole window, not the visible subset.
+    for (za, zb), n in gross.items():
+        nodes[za].out_total += n
+        nodes[zb].in_total += n
     return ZoneFlowSummary(
         window_from=start,
         window_to=end,
         max_count=top[0][1] if top else 0,
         nodes=[n for i, n in enumerate(nodes) if i in used],
-        edges=[ZoneFlowEdge(from_id=nodes[a].id, to_id=nodes[b].id, count=n) for (a, b), n in top],
+        edges=[
+            ZoneFlowEdge(
+                from_id=nodes[a].id,
+                to_id=nodes[b].id,
+                count=n,
+                back_count=gross.get((b, a), 0),
+            )
+            for (a, b), n in top
+        ],
     )
 
 

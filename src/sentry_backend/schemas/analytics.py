@@ -98,6 +98,10 @@ class ZoneFlowNode(BaseModel):
     type: str  # shelf | fridge | mannequin | checkout | exit | walkway
     x: float
     y: float
+    # Gross movement in/out of this zone over the window (all edges, not just
+    # the top ones) — powers the «хамгийн их татдаг бүс» summary chips.
+    in_total: int = 0
+    out_total: int = 0
 
 
 class ZoneFlowEdge(BaseModel):
@@ -107,6 +111,9 @@ class ZoneFlowEdge(BaseModel):
     from_id: str
     to_id: str
     count: int
+    # Gross count of the LOSING direction (to→from). count+back_count is the
+    # winning direction's gross; the pair shows how one-way the corridor is.
+    back_count: int = 0
 
 
 class ZoneFlowSummary(BaseModel):
