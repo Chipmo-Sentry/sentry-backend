@@ -40,6 +40,10 @@ class TrafficSummary(BaseModel):
     peak_entries: int = 0
     # Mean dwell time (seconds) across completed tracks; null if none yet.
     avg_dwell_seconds: float | None = None
+    # Same metrics over the PRECEDING window of equal length — the KPI cards
+    # show the trend ("↑12% өмнөх 7 хоногоос") instead of a bare number.
+    prev_total: int | None = None
+    prev_avg_dwell_seconds: float | None = None
     series: list[TrafficPoint] = Field(default_factory=list)
 
 

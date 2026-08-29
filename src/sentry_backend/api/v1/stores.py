@@ -200,6 +200,14 @@ async def get_store_traffic(
     avg_dwell = await analytics_repo.avg_dwell_seconds_for_store(
         db, store_id=store_id, start=start, end=end
     )
+    # Preceding window of equal length — powers the KPI trend badges.
+    prev_start = start - timedelta(hours=hours)
+    prev_series = await analytics_repo.visits_hourly_for_store(
+        db, store_id=store_id, start=prev_start, end=start
+    )
+    prev_avg_dwell = await analytics_repo.avg_dwell_seconds_for_store(
+        db, store_id=store_id, start=prev_start, end=start
+    )
     return TrafficSummary(
         window_from=start,
         window_to=end,
@@ -207,6 +215,8 @@ async def get_store_traffic(
         peak_hour=peak[0] if peak else None,
         peak_entries=peak[1] if peak else 0,
         avg_dwell_seconds=avg_dwell,
+        prev_total=sum(n for _, n in prev_series),
+        prev_avg_dwell_seconds=prev_avg_dwell,
         series=[TrafficPoint(hour=h, entries=n) for h, n in series],
     )
 
