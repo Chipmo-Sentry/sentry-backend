@@ -6,14 +6,14 @@ different uniforms. This per-store color is forwarded to the store's live
 workers and wins over the node-global `staff_badge_color`; NULL → the store
 falls back to the node color.
 
-Revision ID: f1a2b3c4d5e6
+Revision ID: 9f3a1c7b52e4
 Revises: e9f0a1b2c3d5
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "f1a2b3c4d5e6"
+revision = "9f3a1c7b52e4"
 down_revision = "e9f0a1b2c3d5"
 branch_labels = None
 depends_on = None
