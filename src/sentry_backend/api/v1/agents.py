@@ -275,6 +275,7 @@ async def agent_register_camera(
             store_id=str(cam.store_id),
             risk_threshold=cam.risk_threshold,
             zones=cam.zones,
+            staff_badge_color=await store_repo.get_staff_badge_color(db, cam.store_id),
         )
     return CameraPublic.from_orm_camera(cam)
 
@@ -330,6 +331,7 @@ async def agent_update_camera(
                 store_id=str(cam.store_id),
                 risk_threshold=cam.risk_threshold,
                 zones=cam.zones,
+                staff_badge_color=await store_repo.get_staff_badge_color(db, cam.store_id),
             )
     return CameraPublic.from_orm_camera(cam)
 

@@ -24,8 +24,16 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         store_id: str | None = None,
         risk_threshold: float | None = None,
         zones: list[dict[str, object]] | None = None,
+        staff_badge_color: str | None = None,
     ) -> bool:
-        rec["start"].append({"name": name, "store_id": store_id, "zones": zones})
+        rec["start"].append(
+            {
+                "name": name,
+                "store_id": store_id,
+                "zones": zones,
+                "staff_badge_color": staff_badge_color,
+            }
+        )
         return True
 
     async def stop_worker(name: str) -> bool:
@@ -50,6 +58,13 @@ async def test_provision_forwards_zones_to_worker(calls: dict[str, list]) -> Non
     zones = [{"type": "exit", "points": [[0.1, 0.1], [0.9, 0.1], [0.5, 0.9]]}]
     await live_provision.provision("cam1", "rtsp://cam/1", enabled=True, zones=zones)
     assert calls["start"][0]["zones"] == zones
+
+
+async def test_provision_forwards_staff_badge_color(calls: dict[str, list]) -> None:
+    await live_provision.provision(
+        "cam1", "rtsp://cam/1", enabled=True, staff_badge_color="blue"
+    )
+    assert calls["start"][0]["staff_badge_color"] == "blue"
 
 
 async def test_provision_disabled_tears_down(calls: dict[str, list]) -> None:

@@ -43,6 +43,7 @@ async def start_worker(
     store_id: str | None = None,
     risk_threshold: float | None = None,
     zones: list[dict[str, object]] | None = None,
+    staff_badge_color: str | None = None,
 ) -> bool:
     """POST sentry-ai /v1/live/start for this camera. Never raises.
 
@@ -52,6 +53,8 @@ async def start_worker(
     `zones` (docs/29) are the camera's normalized detection polygons; the node's
     behavior engine uses them (exit_after_concealment / repeated_shelf_visit).
     Omitted when None/empty so an un-updated node simply ignores the field.
+    `staff_badge_color` is THIS store's staff lanyard color; the node uses it
+    over its global color. Omitted when None so the node keeps its global color.
     """
     settings = get_settings()
     if not settings.sentry_ai_url or not settings.mediamtx_rtsp_url:
@@ -72,6 +75,8 @@ async def start_worker(
         body["risk_threshold"] = risk_threshold
     if zones:
         body["zones"] = zones
+    if staff_badge_color:
+        body["staff_badge_color"] = staff_badge_color
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.post(url, json=body, headers=headers)

@@ -25,6 +25,7 @@ async def provision(
     store_id: str | None = None,
     risk_threshold: float | None = None,
     zones: list[dict[str, object]] | None = None,
+    staff_badge_color: str | None = None,
 ) -> None:
     """Bring a camera online (or take it offline if disabled).
 
@@ -32,6 +33,7 @@ async def provision(
     Disabled → tear both down. `store_id` enables cross-camera re-ID (ADR-0023).
     `risk_threshold` is the per-camera breach threshold the node fires at.
     `zones` (docs/29) are forwarded to the live worker's behavior engine.
+    `staff_badge_color` is the store's staff lanyard color (over the node color).
     """
     if not enabled:
         await deprovision(mediamtx_path)
@@ -41,7 +43,11 @@ async def provision(
     # add_path returned, so the path config is registered. The worker retries
     # its RTSP connection internally if MediaMTX isn't serving frames yet.
     await live_ai_client.start_worker(
-        mediamtx_path, store_id=store_id, risk_threshold=risk_threshold, zones=zones
+        mediamtx_path,
+        store_id=store_id,
+        risk_threshold=risk_threshold,
+        zones=zones,
+        staff_badge_color=staff_badge_color,
     )
 
 

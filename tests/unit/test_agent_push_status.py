@@ -88,14 +88,24 @@ def test_agent_push_marks_stale_agent_offline(
 def test_admin_patch_store_push_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     sid, oid = uuid4(), uuid4()
     store = SimpleNamespace(
-        id=sid, name="Дэлгүүр A", organization_id=oid, agent_stream_push_url=None
+        id=sid,
+        name="Дэлгүүр A",
+        organization_id=oid,
+        agent_stream_push_url=None,
+        agent_tunnel_hostname=None,
+        agent_tunnel_token=None,
+        staff_badge_color=None,
     )
 
     async def _get(_db: object, _id: object) -> object:
         return store
 
-    async def _update(_db: object, s: object, *, agent_stream_push_url: str | None) -> object:
-        # Mirror the repo's empty-string-clears semantics.
+    async def _update(
+        _db: object, s: object, *, agent_stream_push_url: str | None = None, **_rest: object
+    ) -> object:
+        # Mirror the repo's empty-string-clears semantics. **_rest absorbs the
+        # other store fields update_store_admin forwards (tunnel token/hostname)
+        # so this focused test doesn't break when those are added.
         s.agent_stream_push_url = agent_stream_push_url or None
         return s
 

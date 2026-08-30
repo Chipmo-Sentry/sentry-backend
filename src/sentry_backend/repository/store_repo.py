@@ -53,6 +53,16 @@ async def get_store_any_org(db: AsyncSession, store_id: UUID) -> Store | None:
     return result.scalar_one_or_none()
 
 
+async def get_staff_badge_color(db: AsyncSession, store_id: UUID) -> str | None:
+    """The store's staff lanyard color, forwarded to its live workers (wins over
+    the node-global color). Scalar lookup so camera provisioning doesn't load a
+    whole Store row just for this one field."""
+    result = await db.execute(
+        select(Store.staff_badge_color).where(Store.id == store_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_store(
     db: AsyncSession,
     *,
@@ -61,6 +71,7 @@ async def create_store(
     address: str | None,
     timezone: str,
     telegram_chat_id: str | None = None,
+    staff_badge_color: str | None = None,
 ) -> Store:
     store = Store(
         organization_id=organization_id,
@@ -68,6 +79,7 @@ async def create_store(
         address=address,
         timezone=timezone,
         telegram_chat_id=telegram_chat_id or None,
+        staff_badge_color=(staff_badge_color.strip().lower() or None) if staff_badge_color else None,
     )
     db.add(store)
     await db.flush()
@@ -85,6 +97,7 @@ async def update_store(
     agent_stream_push_url: str | None = None,
     agent_tunnel_token: str | None = None,
     agent_tunnel_hostname: str | None = None,
+    staff_badge_color: str | None = None,
 ) -> Store:
     if name is not None:
         store.name = name
@@ -103,6 +116,9 @@ async def update_store(
         store.agent_tunnel_token = agent_tunnel_token or None
     if agent_tunnel_hostname is not None:
         store.agent_tunnel_hostname = agent_tunnel_hostname.strip().lower() or None
+    if staff_badge_color is not None:
+        # Empty string clears → the store falls back to the node-global color.
+        store.staff_badge_color = staff_badge_color.strip().lower() or None
     await db.flush()
     return store
 

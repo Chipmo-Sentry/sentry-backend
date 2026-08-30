@@ -15,7 +15,7 @@ from sentry_backend.deps.tenancy import (
     get_current_organization_id,
     get_current_organization_id_admin,
 )
-from sentry_backend.repository import analytics_repo, store_repo
+from sentry_backend.repository import analytics_repo, camera_repo, store_repo
 from sentry_backend.schemas.analytics import (
     DemographicSlice,
     DemographicsSummary,
@@ -40,6 +40,7 @@ from sentry_backend.schemas.analytics import (
 )
 from sentry_backend.schemas.floor_plan import DEFAULT_PLAN_SIZE, FloorPlan
 from sentry_backend.schemas.store import StoreCreate, StorePublic, StoreUpdate
+from sentry_backend.services import live_provision
 from sentry_backend.services.footfall_aggregator import point_in_polygon
 
 # Cap the heatmap window at 90 days so a hostile `hours` can't scan the whole
@@ -71,6 +72,7 @@ async def create_store(
         address=body.address,
         timezone=body.timezone,
         telegram_chat_id=body.telegram_chat_id,
+        staff_badge_color=body.staff_badge_color,
     )
     return StorePublic.model_validate(store)
 
@@ -97,6 +99,7 @@ async def update_store(
     store = await store_repo.get_store(db, store_id, org_id)
     if store is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+    prev_badge = store.staff_badge_color
     store = await store_repo.update_store(
         db,
         store,
@@ -104,8 +107,37 @@ async def update_store(
         address=body.address,
         timezone=body.timezone,
         telegram_chat_id=body.telegram_chat_id,
+        staff_badge_color=body.staff_badge_color,
     )
+    # A badge-color change must reach the running workers now, not on the next
+    # per-camera edit — re-provision the store's cloud cameras with the new color.
+    if store.staff_badge_color != prev_badge:
+        await _reprovision_store_cameras(db, store_id, org_id, store.staff_badge_color)
     return StorePublic.model_validate(store)
+
+
+async def _reprovision_store_cameras(
+    db: AsyncSession, store_id: UUID, org_id: UUID, staff_badge_color: str | None
+) -> None:
+    """Restart each enabled cloud camera's live worker so a store-level change
+    (the staff badge color) applies immediately. Best-effort per camera; the
+    node treats an identical spec as a no-op, so only the color change restarts."""
+    cams = await camera_repo.list_cameras_for_org(db, org_id, store_id=store_id)
+    for cam in cams:
+        if cam.topology_mode != "cloud" or not cam.mediamtx_path or not cam.enabled:
+            continue
+        rtsp = await camera_repo.decrypt_rtsp_url(cam)
+        if not rtsp:
+            continue
+        await live_provision.provision(
+            cam.mediamtx_path,
+            rtsp,
+            enabled=cam.enabled,
+            store_id=str(cam.store_id),
+            risk_threshold=cam.risk_threshold,
+            zones=cam.zones,
+            staff_badge_color=staff_badge_color,
+        )
 
 
 @router.delete("/{store_id}", status_code=status.HTTP_204_NO_CONTENT)

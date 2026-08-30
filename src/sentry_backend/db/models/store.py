@@ -37,6 +37,12 @@ class Store(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # the agent falls back to an ephemeral quick tunnel. Superadmin-editable.
     agent_tunnel_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
     agent_tunnel_hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Staff lanyard/badge color for THIS store (named e.g. "orange" or #rrggbb).
+    # One AI node serves many stores, so the color is per-store; it's forwarded
+    # to each of the store's live workers and wins over the node-global
+    # `staff_badge_color`. Null → the store uses the node-global color (or, if
+    # that's also unset, staff identification is off). See sentry-ai staff.py.
+    staff_badge_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # docs/30 — top-down floor plan authored in the agent-pc «Plan зураг» page:
     # {size, walls, fixtures[type], cameras[pos, dir_deg, homography, calib_points]}.
     # The plan is the SOURCE; per-camera Camera.zones are DERIVED from it (plan

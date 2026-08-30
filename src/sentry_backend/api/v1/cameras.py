@@ -12,7 +12,7 @@ from sentry_backend.deps.tenancy import (
     get_current_organization_id,
     get_current_organization_id_admin,
 )
-from sentry_backend.repository import camera_repo
+from sentry_backend.repository import camera_repo, store_repo
 from sentry_backend.schemas.camera import (
     CameraCreate,
     CameraPublic,
@@ -76,6 +76,7 @@ async def create_camera(
             store_id=str(cam.store_id),
             risk_threshold=cam.risk_threshold,
             zones=cam.zones,
+            staff_badge_color=await store_repo.get_staff_badge_color(db, cam.store_id),
         )
     return CameraPublic.from_orm_camera(cam)
 
@@ -184,6 +185,7 @@ async def update_camera(
                 store_id=str(cam.store_id),
                 risk_threshold=cam.risk_threshold,
                 zones=cam.zones,
+                staff_badge_color=await store_repo.get_staff_badge_color(db, cam.store_id),
             )
     return CameraPublic.from_orm_camera(cam)
 

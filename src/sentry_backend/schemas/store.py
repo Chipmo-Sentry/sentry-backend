@@ -11,6 +11,9 @@ class StoreCreate(BaseModel):
     address: str | None = Field(default=None, max_length=500)
     timezone: str = Field(default="Asia/Ulaanbaatar", max_length=64)
     telegram_chat_id: str | None = Field(default=None, max_length=64)
+    # Staff lanyard color for this store (named "orange" or #rrggbb). Empty →
+    # falls back to the AI node's global color. See sentry-ai staff.py.
+    staff_badge_color: str | None = Field(default=None, max_length=16)
 
 
 class StoreUpdate(BaseModel):
@@ -18,6 +21,7 @@ class StoreUpdate(BaseModel):
     address: str | None = Field(default=None, max_length=500)
     timezone: str | None = Field(default=None, max_length=64)
     telegram_chat_id: str | None = Field(default=None, max_length=64)
+    staff_badge_color: str | None = Field(default=None, max_length=16)
 
 
 class StorePublic(BaseModel):
@@ -29,4 +33,5 @@ class StorePublic(BaseModel):
     address: str | None
     timezone: str
     telegram_chat_id: str | None
+    staff_badge_color: str | None = None
     created_at: datetime

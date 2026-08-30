@@ -38,6 +38,9 @@ def test_admin_stores_returns_rows(client: TestClient, monkeypatch: pytest.Monke
         name="Дэлгүүр A",
         organization_id=oid,
         agent_stream_push_url="rtsp://example:8554",
+        agent_tunnel_hostname=None,
+        agent_tunnel_token=None,
+        staff_badge_color=None,
     )
 
     async def _rows(_db: object) -> list[tuple[object, str, int]]:
