@@ -6,10 +6,15 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.agent import Agent
+from sentry_backend.db.models.alert import Alert
 from sentry_backend.db.models.analytics_flow import FLOW_GRID
 from sentry_backend.db.models.analytics_footfall import GRID_SIZE
+from sentry_backend.db.models.camera import Camera
+from sentry_backend.db.models.feedback import Feedback
 from sentry_backend.deps.db import get_db
 from sentry_backend.deps.tenancy import (
     get_current_organization_id,
@@ -746,3 +751,149 @@ async def get_store_peak(
         max_entries=max_entries,
         cells=[PeakCell(dow=d, hour=h, entries=n) for d, h, n in cells],
     )
+
+
+# Store agents seen within this window are "reporting"; a stale agent means its
+# per-camera push flags can't be trusted → those cameras are "unknown".
+_AGENT_ONLINE_WINDOW = timedelta(minutes=3)
+
+
+@router.get("/{store_id}/analytics/system-health")
+async def get_store_system_health(
+    store_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: Annotated[UUID, Depends(get_current_organization_id)],
+    hours: Annotated[int, Query(ge=1, le=_MAX_HOURS)] = 24 * 30,
+) -> dict[str, object]:
+    """Per-store system-quality snapshot for the analytics page.
+
+    - cameras: live availability (streaming now / enabled) + the offline list
+      with the real reason. No heartbeat time-series is stored, so this is a
+      CURRENT-state number, not a historical uptime %.
+    - precision / false-alarm rate from staff feedback on THIS store's alerts.
+    - response_time: alert → first staff feedback (no separate acknowledge
+      action exists), median + mean minutes.
+    Recall is intentionally absent — a missed theft leaves nothing to count.
+    """
+    store = await store_repo.get_store(db, store_id, org_id)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дэлгүүр олдсонгүй.")
+    now = datetime.now(UTC)
+    frm = now - timedelta(hours=hours)
+
+    # ── Cameras: match this store's enabled cameras to its agents' push state ──
+    cam_rows = (
+        await db.execute(
+            select(Camera.mediamtx_path, Camera.name).where(
+                Camera.store_id == store_id, Camera.enabled.is_(True)
+            )
+        )
+    ).all()
+    agents = (
+        await db.execute(
+            select(Agent).where(Agent.store_id == store_id, Agent.is_active.is_(True))
+        )
+    ).scalars().all()
+    push_by_path: dict[str, dict[str, Any]] = {}
+    for a in agents:
+        fresh = a.last_seen_at is not None and now - a.last_seen_at < _AGENT_ONLINE_WINDOW
+        for entry in a.push_status or []:
+            p = entry.get("path")
+            if isinstance(p, str) and p:
+                push_by_path[p] = {
+                    "running": bool(entry.get("running")),
+                    "fresh": fresh,
+                    "last_error": entry.get("last_error"),
+                }
+    online = offline = unknown = 0
+    offline_list: list[dict[str, object]] = []
+    for path, cam_name in cam_rows:
+        st = push_by_path.get(path) if path else None
+        if st is None:
+            unknown += 1
+        elif st["fresh"] and st["running"]:
+            online += 1
+        else:
+            offline += 1
+            offline_list.append(
+                {
+                    "camera": cam_name,
+                    "reason": "Агент офлайн"
+                    if not st["fresh"]
+                    else (st["last_error"] or "Дамжуулал зогссон"),
+                }
+            )
+    measurable = online + offline
+    cameras = {
+        "total_enabled": len(cam_rows),
+        "online": online,
+        "offline": offline,
+        "unknown": unknown,
+        "availability_pct": round(100.0 * online / measurable, 1) if measurable else None,
+        "offline_list": offline_list[:50],
+    }
+
+    # ── Precision / false-alarm rate from this store's alert feedback ──
+    fb_rows = (
+        await db.execute(
+            select(Alert.id, Feedback.verdict, Feedback.created_at)
+            .join(Feedback, Feedback.alert_id == Alert.id)
+            .where(Alert.store_id == store_id, Alert.created_at >= frm)
+        )
+    ).all()
+    latest: dict[Any, str] = {}
+    latest_ts: dict[Any, datetime] = {}
+    for aid, verdict, fts in fb_rows:
+        if aid not in latest_ts or fts > latest_ts[aid]:
+            latest_ts[aid] = fts
+            latest[aid] = str(verdict)
+    tp = sum(1 for v in latest.values() if v == "true_positive")
+    fp = sum(1 for v in latest.values() if v == "false_positive")
+    unclear = sum(1 for v in latest.values() if v not in ("true_positive", "false_positive"))
+    total_alerts = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(Alert)
+                .where(Alert.store_id == store_id, Alert.created_at >= frm)
+            )
+        ).scalar()
+        or 0
+    )
+    labeled = len(latest)
+    quality = {
+        "total_alerts": total_alerts,
+        "labeled": labeled,
+        "tp": tp,
+        "fp": fp,
+        "unclear": unclear,
+        "precision": round(tp / (tp + fp), 3) if (tp + fp) else None,
+        "fp_rate": round(fp / labeled, 3) if labeled else None,
+    }
+
+    # ── Alert → response time (first feedback proxy) ──
+    delta_rows = (
+        await db.execute(
+            select(Alert.created_at, func.min(Feedback.created_at))
+            .join(Feedback, Feedback.alert_id == Alert.id)
+            .where(Alert.store_id == store_id, Alert.created_at >= frm)
+            .group_by(Alert.id, Alert.created_at)
+        )
+    ).all()
+    mins = sorted(
+        (fb - created).total_seconds() / 60.0
+        for created, fb in delta_rows
+        if fb is not None and fb >= created
+    )
+    if mins:
+        n = len(mins)
+        median = mins[n // 2] if n % 2 else (mins[n // 2 - 1] + mins[n // 2]) / 2.0
+        response_time = {
+            "count": n,
+            "median_min": round(median, 1),
+            "mean_min": round(sum(mins) / n, 1),
+        }
+    else:
+        response_time = {"count": 0, "median_min": None, "mean_min": None}
+
+    return {"cameras": cameras, "quality": quality, "response_time": response_time}
