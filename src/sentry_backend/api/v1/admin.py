@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sentry_backend.db.models.agent import Agent
 from sentry_backend.db.models.ai_node import AiNode
 from sentry_backend.db.models.alert import Alert
 from sentry_backend.db.models.camera import Camera
@@ -889,3 +890,113 @@ async def set_telegram_config(
     await db.commit()
     configured, hint = await telegram_config_repo.get_status(db)
     return TelegramConfigView(configured=configured, token_hint=hint)
+
+
+# Cameras whose store agent was seen within this window count as reporting; a
+# stale agent means we can't trust its per-camera push flags, so its cameras
+# are "unknown", not falsely "offline".
+_AGENT_ONLINE_WINDOW = timedelta(minutes=3)
+
+
+@router.get("/analytics/system-health")
+async def system_health(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_super_admin)],
+    range_: Annotated[str, Query(alias="range")] = "30d",
+) -> dict[str, object]:
+    """Model-performance / operations snapshot for the superadmin dashboard.
+
+    - cameras: live availability (streaming now / enabled) + the offline list
+      with the real reason (agent push last_error). Historical uptime % needs a
+      heartbeat time-series we don't store yet, so this is a CURRENT-state
+      availability number, labelled as such in the UI.
+    - response_time: alert → first-human-action latency, proxied by the gap
+      between an alert and its first staff feedback (we have no separate
+      acknowledge action yet). Median is the headline; mean + count for context.
+
+    Precision / false-positive rate live on /analytics/quality (feedback-based);
+    the dashboard shows both together. Recall isn't derivable — a missed theft
+    leaves no record to count — so it's deliberately absent.
+    """
+    now = datetime.now(UTC)
+
+    # ── Cameras: match each enabled camera to its store agent's push state ──
+    cam_rows = (
+        await db.execute(
+            select(Camera.mediamtx_path, Camera.name, Store.name, Camera.store_id)
+            .join(Store, Camera.store_id == Store.id)
+            .where(Camera.enabled.is_(True))
+        )
+    ).all()
+    agents = (await db.execute(select(Agent).where(Agent.is_active.is_(True)))).scalars().all()
+    push_by_path: dict[str, dict[str, Any]] = {}
+    for a in agents:
+        fresh = a.last_seen_at is not None and now - a.last_seen_at < _AGENT_ONLINE_WINDOW
+        for entry in a.push_status or []:
+            p = entry.get("path")
+            if isinstance(p, str) and p:
+                push_by_path[p] = {
+                    "running": bool(entry.get("running")),
+                    "fresh": fresh,
+                    "last_error": entry.get("last_error"),
+                }
+
+    online = offline = unknown = 0
+    offline_list: list[dict[str, object]] = []
+    for path, cam_name, store_name, _sid in cam_rows:
+        st = push_by_path.get(path) if path else None
+        if st is None:
+            unknown += 1
+            continue
+        if st["fresh"] and st["running"]:
+            online += 1
+        else:
+            offline += 1
+            offline_list.append(
+                {
+                    "camera": cam_name,
+                    "store": store_name,
+                    "reason": (
+                        "Агент офлайн" if not st["fresh"] else (st["last_error"] or "Дамжуулал зогссон")
+                    ),
+                }
+            )
+    total_enabled = len(cam_rows)
+    measurable = online + offline  # exclude unknown from the availability ratio
+    cameras = {
+        "total_enabled": total_enabled,
+        "online": online,
+        "offline": offline,
+        "unknown": unknown,
+        "availability_pct": round(100.0 * online / measurable, 1) if measurable else None,
+        "offline_list": offline_list[:50],
+    }
+
+    # ── Alert → response time (feedback-as-acknowledge proxy) ──
+    span = _METRIC_SPANS.get(range_, _METRIC_SPANS["30d"])
+    frm = now - span
+    delta_rows = (
+        await db.execute(
+            select(Alert.created_at, func.min(Feedback.created_at))
+            .join(Feedback, Feedback.alert_id == Alert.id)
+            .where(Alert.created_at >= frm)
+            .group_by(Alert.id, Alert.created_at)
+        )
+    ).all()
+    mins = sorted(
+        (fb - created).total_seconds() / 60.0
+        for created, fb in delta_rows
+        if fb is not None and fb >= created
+    )
+    if mins:
+        n = len(mins)
+        median = mins[n // 2] if n % 2 else (mins[n // 2 - 1] + mins[n // 2]) / 2.0
+        response_time = {
+            "count": n,
+            "median_min": round(median, 1),
+            "mean_min": round(sum(mins) / n, 1),
+        }
+    else:
+        response_time = {"count": 0, "median_min": None, "mean_min": None}
+
+    return {"range": range_, "cameras": cameras, "response_time": response_time}
