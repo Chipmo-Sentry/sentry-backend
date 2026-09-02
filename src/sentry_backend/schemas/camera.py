@@ -105,6 +105,10 @@ class StreamTokenResponse(BaseModel):
     # (named by mediamtx_path) subscribe-only.
     livekit_url: str | None = None
     livekit_token: str | None = None
+    # Cloudflare TURN ICE servers (short-lived). When present, the LiveKit player
+    # forces media to relay through Cloudflare's edge/backbone (the low-stutter
+    # path for distant viewers). Absent → direct/host ICE as before.
+    ice_servers: list[dict[str, Any]] | None = None
 
 
 class CameraPublic(BaseModel):

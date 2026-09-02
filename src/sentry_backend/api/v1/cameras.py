@@ -20,7 +20,7 @@ from sentry_backend.schemas.camera import (
     StreamTokenResponse,
 )
 from sentry_backend.security import create_livekit_token, create_stream_token
-from sentry_backend.services import live_provision
+from sentry_backend.services import cloudflare_turn, live_provision
 from sentry_backend.services.billing.gating import SUSPENDED_DETAIL, org_billing_status
 from sentry_backend.services.billing.status import BillingStatus
 from sentry_backend.settings import get_settings
@@ -126,6 +126,9 @@ async def get_stream_token(
     livekit_token = create_livekit_token(
         cam.mediamtx_path, f"viewer-{uuid4().hex[:12]}"
     )
+    # Cloudflare TURN (best-effort) — relays LiveKit media via CF edge/backbone
+    # for distant viewers; None when unconfigured → direct ICE as before.
+    ice_servers = await cloudflare_turn.ice_servers()
     return StreamTokenResponse(
         token=token,
         expires_in=get_settings().stream_token_ttl_sec,
@@ -137,6 +140,7 @@ async def get_stream_token(
         ),
         livekit_url=get_settings().livekit_url or None,
         livekit_token=livekit_token,
+        ice_servers=ice_servers,
     )
 
 

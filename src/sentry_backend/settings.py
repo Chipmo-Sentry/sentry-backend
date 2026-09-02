@@ -170,6 +170,14 @@ class Settings(BaseSettings):
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: SecretStr | None = None
+    # Cloudflare Realtime TURN — relays LiveKit media via the viewer's nearest
+    # Cloudflare PoP + CF backbone to the node (the "Discord model": nearby edge,
+    # good backbone), instead of one long lossy MN→KR public hop. Both set → the
+    # stream-token carries CF ICE servers and the player forces relay through
+    # them. First 1 TB/month is free. Key created in the CF dashboard (Realtime →
+    # TURN); key_id is public, api_token is the secret.
+    cloudflare_turn_key_id: str = ""
+    cloudflare_turn_api_token: SecretStr | None = None
     # Per-camera read token (WHEP/HLS) TTL + the MediaMTX authHTTP shared secret.
     # stream_token_ttl_sec covers a viewing session (reconnects reuse the URL).
     # mediamtx_auth_secret, when set, must be sent by MediaMTX as the
