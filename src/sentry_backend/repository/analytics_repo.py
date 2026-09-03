@@ -5,8 +5,10 @@ aggregator and by any future edge push). `grid_for_store` sums a time window
 back into a single GRID×GRID heatmap for the /insights viewport.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -18,6 +20,7 @@ from sentry_backend.db.models.analytics_flow import AnalyticsFlow
 from sentry_backend.db.models.analytics_footfall import AnalyticsFootfall
 from sentry_backend.db.models.analytics_path import AnalyticsPath
 from sentry_backend.db.models.analytics_visit import AnalyticsVisit
+from sentry_backend.db.models.store import Store
 
 
 class BucketDelta:
@@ -339,27 +342,73 @@ async def insert_paths(
     rows: list[tuple[str, datetime, float, list[list[float]], str | None, str | None]],
 ) -> None:
     """Insert finished walked paths. Each tuple is
-    (camera_id, started_at, duration_sec, points, gender, age_band)."""
+    (camera_id, started_at, duration_sec, points, gender, age_band).
+
+    Each row also gets its visitor number «YYYYMMDD-NNN»: the store-local date
+    of `started_at` plus that day's running sequence, continuing from the
+    highest number already stored for the day. The aggregator is the single
+    writer, so a read-then-insert sequence is race-free in practice."""
     if not rows:
         return
-    await db.execute(
-        pg_insert(AnalyticsPath).values(
-            [
-                {
-                    "organization_id": organization_id,
-                    "store_id": store_id,
-                    "camera_id": camera_id,
-                    "started_at": started_at,
-                    "duration_sec": round(dur, 1),
-                    "points": pts,
-                    "n_points": len(pts),
-                    "gender": gender,
-                    "age_band": age,
-                }
-                for camera_id, started_at, dur, pts, gender, age in rows
-            ]
+    tz = await _store_timezone(db, store_id)
+    ordered = sorted(rows, key=lambda r: r[1])
+    next_seq: dict[str, int] = {}
+    values: list[dict[str, Any]] = []
+    for camera_id, started_at, dur, pts, gender, age in ordered:
+        day = _local_day(started_at, tz)
+        if day not in next_seq:
+            next_seq[day] = await _next_visitor_seq(db, store_id, day)
+        seq = next_seq[day]
+        next_seq[day] = seq + 1
+        values.append(
+            {
+                "organization_id": organization_id,
+                "store_id": store_id,
+                "camera_id": camera_id,
+                "started_at": started_at,
+                "duration_sec": round(dur, 1),
+                "points": pts,
+                "n_points": len(pts),
+                "gender": gender,
+                "age_band": age,
+                "visitor_id": f"{day}-{seq:03d}",
+            }
         )
-    )
+    await db.execute(pg_insert(AnalyticsPath).values(values))
+
+
+async def _store_timezone(db: AsyncSession, store_id: UUID) -> str:
+    tz = (await db.execute(select(Store.timezone).where(Store.id == store_id))).scalar()
+    return tz or "UTC"
+
+
+def _local_day(ts: datetime, tz: str) -> str:
+    """`ts` as a YYYYMMDD string in the store's timezone (UTC on a bad tz)."""
+    try:
+        zone = ZoneInfo(tz)
+    except Exception:  # noqa: BLE001 — a bad stored tz must not drop paths
+        zone = ZoneInfo("UTC")
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts.astimezone(zone).strftime("%Y%m%d")
+
+
+async def _next_visitor_seq(db: AsyncSession, store_id: UUID, day: str) -> int:
+    """1 + the highest sequence already stored for (store, day)."""
+    last = (
+        await db.execute(
+            select(AnalyticsPath.visitor_id)
+            .where(AnalyticsPath.store_id == store_id, AnalyticsPath.visitor_id.like(f"{day}-%"))
+            .order_by(AnalyticsPath.visitor_id.desc())
+            .limit(1)
+        )
+    ).scalar()
+    if not last:
+        return 1
+    try:
+        return int(last.rsplit("-", 1)[1]) + 1
+    except (IndexError, ValueError):
+        return 1
 
 
 async def paths_for_store(
@@ -369,9 +418,10 @@ async def paths_for_store(
     start: datetime,
     end: datetime,
     limit: int = 400,
-) -> list[tuple[datetime, float, list[list[float]], str | None, str | None]]:
+) -> list[tuple[datetime, float, list[list[float]], str | None, str | None, str | None]]:
     """Most recent walked paths (started_at, duration_sec, points, gender,
-    age_band), newest first, row-capped so the spaghetti layer stays light."""
+    age_band, visitor_id), newest first, row-capped so the spaghetti layer
+    stays light."""
     result = await db.execute(
         select(
             AnalyticsPath.started_at,
@@ -379,6 +429,7 @@ async def paths_for_store(
             AnalyticsPath.points,
             AnalyticsPath.gender,
             AnalyticsPath.age_band,
+            AnalyticsPath.visitor_id,
         )
         .where(
             AnalyticsPath.store_id == store_id,
@@ -388,7 +439,7 @@ async def paths_for_store(
         .order_by(AnalyticsPath.started_at.desc())
         .limit(limit)
     )
-    return [(ts, float(d), pts, g, a) for ts, d, pts, g, a in result.all()]
+    return [(ts, float(d), pts, g, a, vid) for ts, d, pts, g, a, vid in result.all()]
 
 
 async def visits_by_dow_hour(

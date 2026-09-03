@@ -50,6 +50,11 @@ class AnalyticsPath(UUIDPrimaryKeyMixin, Base):
     # child|youth|adult|senior.
     gender: Mapped[str | None] = mapped_column(String(16), nullable=True)
     age_band: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Human-readable visitor number (owner request 09-03): the store-local
+    # date + that day's running sequence, «20260903-012». Assigned by the
+    # backend on insert (node track ids reset per camera/restart, so they can't
+    # serve as a stable id); NULL only for rows older than the backfill.
+    visitor_id: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # [[x, y], ...] normalized to the plan [0,1]² — already simplified.
     points: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
     n_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

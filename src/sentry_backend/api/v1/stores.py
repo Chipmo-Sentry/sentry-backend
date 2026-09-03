@@ -501,8 +501,10 @@ async def get_store_paths(
         window_from=start,
         window_to=end,
         paths=[
-            WalkedPath(started_at=ts, duration_sec=d, points=pts, gender=g, age_band=a)
-            for ts, d, pts, g, a in rows
+            WalkedPath(
+                started_at=ts, duration_sec=d, points=pts, gender=g, age_band=a, visitor_id=vid
+            )
+            for ts, d, pts, g, a, vid in rows
         ],
     )
 

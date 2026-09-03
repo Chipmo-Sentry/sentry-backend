@@ -137,6 +137,9 @@ class WalkedPath(BaseModel):
     points: list[list[float]]
     gender: str | None = None  # male | female | None(unclassified)
     age_band: str | None = None  # child | youth | adult | senior | None
+    # «YYYYMMDD-NNN»: store-local date + that day's running number, assigned by
+    # the backend on insert. None only for rows older than the backfill.
+    visitor_id: str | None = None
 
 
 class PathsSummary(BaseModel):
